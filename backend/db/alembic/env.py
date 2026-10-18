@@ -1,3 +1,6 @@
+import sys
+from os import path
+
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
@@ -14,11 +17,21 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+# Ensure the backend app is importable so Alembic can see the ORM models
+# and their metadata for autogenerate support.
+sys.path.insert(0, path.join(path.dirname(__file__), "..", ".."))
+
+from app.db.models import Base  # noqa: E402
+
+target_metadata = Base.metadata
+
+# Allow the database URL to be overridden from the environment (used by
+# tests to target a temporary SQLite database instead of the configured one).
+import os as _os  # noqa: E402
+
+_database_url = _os.environ.get("DATABASE_URL")
+if _database_url:
+    config.set_main_option("sqlalchemy.url", _database_url)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

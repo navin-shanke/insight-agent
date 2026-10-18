@@ -1,7 +1,7 @@
 # Architecture Decision Record — Insight Agent
 
 **Source of truth:** `INSIGHT_AGENT_MASTER_BLUEPRINT.md`
-**Status:** Phase 0 (Audit and Choose the Foundation) — decisions recorded below
+**Status:** Phase 2 (Normalize Data and Connector Contracts) — decisions recorded below
 **Date:** 2026-10-19
 
 ## ADR-001: Foundation selection — build fresh; candidates as design references only
@@ -60,12 +60,23 @@
 
 **Rationale:** Blueprint rules 3, 4, 8; Part VI timestamp rules.
 
+## ADR-005: Web-search provider — DuckDuckGo via `ddgs`
+
+**Decision:** Use DuckDuckGo (via the `ddgs` library) as the first web-search connector. It requires no API key or credentials, making it suitable for local development, and returns real result URLs/titles/snippets. Exa remains a documented alternative if an API key is configured later (`WEB_SEARCH_PROVIDER`/`WEB_SEARCH_API_KEY` env vars in `.env.example`).
+
+**Rationale:** Blueprint Part IV §13 — start with one reliable web-search provider; ADR-002 lists DuckDuckGo via `ddgs` and Exa as candidates. DuckDuckGo's no-credential model avoids the "missing credentials → blocked" path during local development while still returning genuine provider results.
+
+**Consequences:**
+- `backend/app/connectors/duckduckgo.py` implements `SourceConnector` over `ddgs`, surfacing timeouts/HTTP errors/rate limits/malformed responses as structured `AccessFailure`, never fabricating results.
+- If credentials are later configured for a key-requiring provider, the connector must report `MISSING_CREDENTIALS`/blocked rather than fabricate results (blueprint rule 4).
+
+**Revisit trigger:** If a key-requiring provider (e.g. Exa) is preferred, add its connector alongside DuckDuckGo behind the common `SourceConnector` interface and select via `WEB_SEARCH_PROVIDER`.
+
 ## Open items
 - License confirmation for AI Search Agent and Research Agent (no LICENSE files) before any code port.
-- Web-search provider selection (Phase 2).
 - Live Instagram test: requires explicit user authorization + permitted account/session (Blueprint rule 8); not yet run.
 - Candidate offline tests (`npm test` for Jev Social; `pytest` for Agent Reach/AI Search Agent; OpenMagpie connector tests) not yet executed — inspected statically only in Phase 0.
 
 ## Next steps
-- Commit Phase 0 deliverables to a dedicated branch (`phase-0-audit`).
-- Confirm the foundation decision with the user, then begin Phase 1 (make the foundation work) and Phase 2 (common source/discovery schemas + web-search connector).
+- Phase 0, 1, and 2 are complete and committed to GitHub.
+- Confirm with the user before beginning Phase 3 (bounded deep-research graph + claim verification).
