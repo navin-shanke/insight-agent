@@ -200,7 +200,12 @@ async def fetch_url(
     owned_client = client is None
     if client is None:
         client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT),
+            timeout=httpx.Timeout(
+                connect=CONNECT_TIMEOUT,
+                read=READ_TIMEOUT,
+                write=CONNECT_TIMEOUT,
+                pool=5.0,
+            ),
             follow_redirects=False,
             max_redirects=0,
         )

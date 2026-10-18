@@ -8,6 +8,10 @@ from .base import Base, metadata
 from .source import Source
 from .content_snapshot import ContentSnapshot
 from .discovery import Discovery, DiscoverySource
+from .claim import Claim
+from .evidence import Evidence
+from .report import Report
+from .checkpoint import TaskCheckpoint
 
 __all__ = [
     "Base",
@@ -16,5 +20,9 @@ __all__ = [
     "ContentSnapshot",
     "Discovery",
     "DiscoverySource",
+    "Claim",
+    "Evidence",
+    "Report",
+    "TaskCheckpoint",
 ]
 

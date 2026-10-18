@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import String, DateTime, Text, JSON, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
+
+if TYPE_CHECKING:  # pragma: no cover - circular import guard
+    from .claim import Claim
 
 
 def _now_utc() -> datetime:
@@ -54,6 +57,9 @@ class Source(Base):
         back_populates="source", cascade="all, delete-orphan"
     )
     discovery_links: Mapped[list["DiscoverySource"]] = relationship(
+        back_populates="source", cascade="all, delete-orphan"
+    )
+    claims: Mapped[list["Claim"]] = relationship(
         back_populates="source", cascade="all, delete-orphan"
     )
 
