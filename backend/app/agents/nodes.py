@@ -124,8 +124,8 @@ async def discover_sources(service: ResearchService, state: ResearchState) -> di
                         source_type=rec.source_type,
                         canonical_url=url,
                         title=rec.title,
-                        access_status=rec.access_status.value,
-                        metadata=rec.metadata_json or {},
+                        access_status=AccessStatus.READY,
+                        metadata={},
                     )
                     if str(src.id) not in candidates:
                         candidates.add(str(src.id))

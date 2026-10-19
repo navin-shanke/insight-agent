@@ -6,6 +6,9 @@ is intentionally not added until the baseline (database + health) is verified.
 
 from __future__ import annotations
 
+import argparse
+import uuid
+
 from fastapi import FastAPI
 
 from app.core.config import get_settings
@@ -47,3 +50,66 @@ def main() -> None:
         port=settings.api_port,
         reload=(settings.app_env == "development"),
     )
+
+
+def run_daily_discovery(
+    query: str = "daily discovery",
+    topics: list[str] | None = None,
+    source_budget: int = 100,
+    max_iterations: int = 5,
+    token_budget: int = 50000,
+) -> None:
+    """Run a single daily discovery task."""
+    from app.agents.graph import run_research
+
+    from app.agents.service import ResearchService
+
+    service = ResearchService(database_url="sqlite:///./data/insight.db")
+
+    state = run_research(
+        service,
+        task_id=uuid.uuid4(),
+        query=query,
+        topics=topics,
+        lookback_hours=24,
+        source_budget=source_budget,
+        token_budget=token_budget,
+        max_iterations=max_iterations,
+    )
+
+    print(f"Daily discovery complete.")
+    print(f"  Status: {state.get('status')}")
+    print(f"  Discoveries: {len(state.get('discovery_ids', []))}")
+    print(f"  Claims: {len(state.get('claims', []))}")
+    print(f"  Report ID: {state.get('report_id')}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Insight Agent")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # serve command
+    subparsers.add_parser("serve", help="Run the FastAPI API server")
+
+    # daily-discovery command
+    pd = subparsers.add_parser("daily-discovery", help="Run a daily discovery task")
+    pd.add_argument("--query", default="daily discovery", help="Research query")
+    pd.add_argument("--topics", nargs="*", default=None, help="Topics to research")
+    pd.add_argument("--source-budget", type=int, default=100, help="Source budget")
+    pd.add_argument("--max-iterations", type=int, default=5, help="Max iterations")
+    pd.add_argument("--token-budget", type=int, default=50000, help="Token budget")
+
+    args = parser.parse_args()
+
+    if args.command == "serve":
+        main()
+    elif args.command == "daily-discovery":
+        run_daily_discovery(
+            query=args.query,
+            topics=args.topics,
+            source_budget=args.source_budget,
+            max_iterations=args.max_iterations,
+            token_budget=args.token_budget,
+        )
+    else:
+        parser.print_help()

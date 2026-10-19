@@ -171,7 +171,7 @@ async def _run_loop(
     return state
 
 
-def run_research(
+async def run_research(
     service: ResearchService,
     *,
     task_id: UUID,
@@ -205,7 +205,7 @@ def run_research(
     # Build (but do not compile-with-checkpointer) the graph for structure.
     build_graph()
 
-    return asyncio.run(_run_loop(service, state, thread_id, task_id))
+    return await _run_loop(service, state, thread_id, task_id)
 
 
 def resume_research(

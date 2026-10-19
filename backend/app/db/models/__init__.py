@@ -12,6 +12,8 @@ from .claim import Claim
 from .evidence import Evidence
 from .report import Report
 from .checkpoint import TaskCheckpoint
+from .watchlist import Watchlist
+from .scheduled_run import ScheduledRun
 
 __all__ = [
     "Base",
@@ -24,5 +26,7 @@ __all__ = [
     "Evidence",
     "Report",
     "TaskCheckpoint",
+    "Watchlist",
+    "ScheduledRun",
 ]
 

@@ -28,7 +28,7 @@ class Report(Base):
 
     __tablename__ = "reports"
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=lambda: uuid.uuid4().hex)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     body_md: Mapped[str] = mapped_column(Text, nullable=False)
