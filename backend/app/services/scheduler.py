@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
-import uuid
+import uuid as _uuid
 
 from app.agents.graph import run_research
 from app.agents.service import ResearchService
@@ -69,7 +69,7 @@ class SchedulerService:
         task_id = str(uuid4())
         result = await run_research(
             self.service,
-            task_id=uuid.UUID(task_id),
+            task_id=_uuid.UUID(task_id),
             query=query,
             topics=topics,
             lookback_hours=24,
