@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
+import uuid
 
 from app.agents.graph import run_research
 from app.agents.service import ResearchService
@@ -53,7 +54,7 @@ class SchedulerService:
         run.last_run_at = datetime.now(timezone.utc)
         session.flush()
 
-    def run_daily_discovery(
+    async def run_daily_discovery(
         self,
         query: str,
         topics: list[str] | None = None,
@@ -62,21 +63,17 @@ class SchedulerService:
     ):
         """Run a single daily discovery task.
 
-        Args:
-            query: Search query
-            topics: Optional topics to focus on
-            source_budget: Maximum number of sources to inspect
-            max_iterations: Maximum research iterations
-
         Returns:
             Task result dictionary
         """
-        return run_research(
+        task_id = str(uuid4())
+        result = await run_research(
             self.service,
-            task_id=str(uuid4()),
+            task_id=uuid.UUID(task_id),
             query=query,
             topics=topics,
             lookback_hours=24,
             source_budget=source_budget,
             max_iterations=max_iterations,
         )
+        return result

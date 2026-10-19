@@ -7,6 +7,7 @@ is intentionally not added until the baseline (database + health) is verified.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import uuid
 
 from fastapi import FastAPI
@@ -52,7 +53,7 @@ def main() -> None:
     )
 
 
-def run_daily_discovery(
+async def run_daily_discovery(
     query: str = "daily discovery",
     topics: list[str] | None = None,
     source_budget: int = 100,
@@ -66,7 +67,7 @@ def run_daily_discovery(
 
     service = ResearchService(database_url="sqlite:///./data/insight.db")
 
-    state = run_research(
+    state = await run_research(
         service,
         task_id=uuid.uuid4(),
         query=query,
@@ -104,12 +105,14 @@ if __name__ == "__main__":
     if args.command == "serve":
         main()
     elif args.command == "daily-discovery":
-        run_daily_discovery(
-            query=args.query,
-            topics=args.topics,
-            source_budget=args.source_budget,
-            max_iterations=args.max_iterations,
-            token_budget=args.token_budget,
+        asyncio.run(
+            run_daily_discovery(
+                query=args.query,
+                topics=args.topics,
+                source_budget=args.source_budget,
+                max_iterations=args.max_iterations,
+                token_budget=args.token_budget,
+            )
         )
     else:
         parser.print_help()
