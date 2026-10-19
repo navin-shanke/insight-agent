@@ -26,6 +26,7 @@ from typing import Optional, Set
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
+from bs4 import BeautifulSoup
 
 # Maximum bytes to read from a response body.
 MAX_RESPONSE_BYTES = 1_048_576  # 1 MiB
@@ -87,6 +88,15 @@ def is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     if ip.is_unspecified:
         return True
     return True if ip.version == 4 and ip in ipaddress.ip_network("240.0.0.0/4") else False
+
+
+def html_to_text(html: str) -> str:
+    """Convert HTML to plain text, stripping scripts, styles, and markup."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    text = soup.get_text(separator=" ", strip=True)
+    return " ".join(text.split())
 
 
 def resolve_hostname(hostname: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -273,6 +283,11 @@ async def fetch_url(
             text = content.decode("utf-8", errors="replace")
         except Exception:
             text = ""
+
+        # Convert HTML to plain text so LLM-based extraction works on content
+        # rather than raw markup.
+        if content_type_main == "text/html":
+            text = html_to_text(text)
 
         from datetime import datetime, timezone
 
