@@ -1,0 +1,108 @@
+%% Insight Agent: Mermaid Graph
+%% Connects: project goals, phases, components, source files, database models,
+%% dependencies, tests, architectural decisions, current blockers.
+
+graph TD
+    %% Project Goals
+    goals[Research: daily discovery & report generation] --> phase1[Phase 1: Scaffolding]
+    goals --> phase2[Phase 2: Data contracts, connectors, DB models]
+    goals --> phase3[Phase 3: Bounded deep-research workflow]
+    goals --> phase4[Phase 4: Daily Discovery scheduler]
+
+    %% Phases
+    phase1 -->|completed| phase2
+    phase2 -->|completed| phase3
+    phase3 -->|completed| phase4
+    phase4 -->|in progress| phase5[Phase 5: Telegram dashboard]
+    phase4 -->|blocked by: result.complete bug| phase5
+
+    %% Components
+    subgraph COMPONENTS
+        direction LR
+        api[FastAPI: main.py] -->|HTTP / CLI| scheduler[SchedulerService: scheduler.py]
+        scheduler -->|run_daily_discovery()| research[ResearchService: service.py]
+        research -->|graph execution| graph[StateGraph: graph.py]
+        graph -->|10 nodes| nodes[nodes.py: load_context..build_report]
+        graph -->|checkpoints| checkpoints[task_checkpoints table]
+        research -->|DB session| sql[SQLAlchemy engine]
+        sql -->|CRUD| models[DB Models: models/__init__.py]
+        research -->|LLM calls| router[ModelRouter: app/llm/router.py]
+        nodes -->|fetch/inspect| connector[DuckDuckGoConnector: app/connectors.py]
+    end
+
+    %% Database Models
+    subgraph MODELS
+        direction LR
+        source[Source] -->|has many| snapshot[ContentSnapshot]
+        source -->|many-to-many via| discovery_source[DiscoverySource]
+        claim[Claim] -->|belongs to| source
+        evidence[Evidence] -->|links claim→source| claim
+        discovery[Discovery] -->|has many| claim
+        discovery -->|links via| discovery_source
+        report[Report] -->|belongs to| task[TaskCheckpoint]
+        report -->|references| discovery
+    end
+
+    %% Source Files
+    subgraph SOURCE_FILES
+        direction LR
+        g[graph.py] -->|defines| G[StateGraph, NODE_SEQUENCE, _NODE_FUNCS, build_graph(), _run_loop(), _route_after_decide(), resume_research()]
+        n[nodes.py] -->|implements| N[10 async node functions: load_context..build_report]
+        s[scheduler.py] -->|SchedulerService| S[acquire_lock, release_lock, run_daily_discovery]
+        svc[service.py] -->|ResearchService| SS[upsert_source, add_snapshot, add_claim, add_evidence, add_discovery, link_discovery_source, add_report, session, save_checkpoint, load_latest_checkpoint]
+        m[main.py] -->|run_daily_discovery() entry| E[if __name__ == "__main__"]
+        schemas[schemas/] -->|Pydantic contracts| SS & N & G
+        models[db/models/__init__.py] -->|SQLAlchemy models| SS
+    end
+
+    %% Dependencies
+    subgraph DEPS
+        direction LR
+        langgraph[LangGraph] -->|StateGraph, END| g
+        sqlalchemy[SQLAlchemy 2.x] -->|Base.metadata.create_all| svc & models
+        pydantic[Pydantic] -->|BaseModel, ConfigDict| schemas &
+        anthropic[Anthropic API / Claude] -->|LLM calls| router
+        duckduckgo[DuckDuckGo] -->|search + fetch| connector
+        beautifulsoup4[BeautifulSoup4] -->|HTML→text| connector
+        alembic[Alembic] -->|migrations| models
+    end
+
+    %% Tests
+    subgraph TESTS
+        direction LR
+        intg[tests/integration/test_phase4_scheduler.py] -->|6 tests| api
+        intg -->|mocked connector| connector
+        intg -->|mocked router| router
+        unit[tests/unit/] -->|pending| api
+    end
+
+    %% Architectural Decisions
+    subgraph DECISIONS
+        direction LR
+        d1[StateGraph over raw asyncio] -->|ADR-005| g
+        d2[Checkpoint after every node] -->|ADR-005| checkpoints
+        d3[Single asyncio.run() entry] -->|design| research
+        d4[Budgets server-side] -->|enforced| nodes
+        d5[DuckDuckGo only v1] -->|connector| connector
+    end
+
+    %% Current Blocker
+    subgraph BLOCKERS
+        direction LR
+        cb1[result.complete is None] -->|nodes.py:119| nodes
+        cb1 -->|candidates never populate| graph execution
+        cb1 -->|blocks: all candidate sourcing| full run
+    end
+
+    %% Links between sections
+    goals --> phase1 --> phase2 --> phase3 --> phase4
+    phase4 -->|blocked by| cb1
+    cb1 -->|fix: result.get("complete")| g
+    g -->|uses| n
+    n -->|decrement budgets| SS
+    SS -->|persists to| models
+    models -->|queryable by| sql
+    sql -->|used in| api
+    api -->|CLI used by| tests
+    intg -->|validates| api
+```
