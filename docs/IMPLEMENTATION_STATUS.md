@@ -2,9 +2,11 @@
 
 **Blueprint:** [INSIGHT_AGENT_MASTER_BLUEPRINT.md](../INSIGHT_AGENT_MASTER_BLUEPRINT.md)
 **Repository:** https://github.com/navin-shanke/insight-agent
-**Branch:** `phase-4-dashboard-scheduler` (upstream: `origin/phase-4-dashboard-scheduler`)
+**Branch:** `phase-0-audit` (upstream: `origin/phase-0-audit`)
+**Merged PR:** [#2](https://github.com/navin-shanke/insight-agent/pull/2) — merged 2026-10-21.
+**PR merge commit:** `c6c3aeedc7d62f9ac8e1f6ec09562749dfe51bf3`
 **Starting commit for this update:** `e6b8051116b40cb472935f16071ab2696b66ecfb`
-**Verification update:** 2026-10-20. The final commit and GitHub synchronization are recorded in the task completion report.
+**Verification update:** 2026-10-21. PR #2 was merged to `phase-0-audit`; the merge commit is recorded above.
 
 ## Phase scope
 
