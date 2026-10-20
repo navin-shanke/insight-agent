@@ -19,7 +19,10 @@ def db_engine() -> Generator:
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     try:
-        engine = create_engine(f"sqlite:///{path}", connect_args={"timeout": 30})
+        engine = create_engine(
+            f"sqlite:///{path}",
+            connect_args={"timeout": 30}
+        )
         Base.metadata.create_all(engine)
         yield engine
     finally:

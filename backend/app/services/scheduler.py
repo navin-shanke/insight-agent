@@ -77,6 +77,7 @@ class SchedulerService:
             if not self.acquire_lock(session, task_id):
                 return {"status": "skipped", "reason": "lock_held_by_other_task"}
 
+            error = None
             try:
                 result = await run_research(
                     self.service,
@@ -87,6 +88,11 @@ class SchedulerService:
                     source_budget=source_budget,
                     max_iterations=max_iterations,
                 )
-                return result
-            finally:
                 self.release_lock(session, task_id, "completed")
+                return result
+            except Exception as e:
+                error = e
+                raise
+            finally:
+                if error is not None:
+                    self.release_lock(session, task_id, "failed")

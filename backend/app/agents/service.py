@@ -36,7 +36,13 @@ class ResearchService:
         connector: Optional[DuckDuckGoConnector] = None,
         router: Optional[ModelRouter] = None,
     ):
-        self.engine = create_engine(database_url)
+        url_str = str(database_url)
+        if url_str.startswith("sqlite://"):
+            # SQLite-specific connect args for better concurrency
+            connect_args = {"timeout": 30, "check_same_thread": False}
+        else:
+            connect_args = {}
+        self.engine = create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
         Base.metadata.create_all(self.engine)
         self.connector = connector or DuckDuckGoConnector()
         self.router = router or ModelRouter()
