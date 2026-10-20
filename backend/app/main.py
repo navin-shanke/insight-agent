@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import uuid
 
 from fastapi import FastAPI
 
@@ -36,12 +37,13 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
-def main() -> None:
+def serve_api() -> None:
+    """Start the FastAPI application using the configured Uvicorn settings."""
     import uvicorn
 
     settings = get_settings()
     uvicorn.run(
-        "insight_agent.main:app",
+        "app.main:app",
         host=settings.api_host,
         port=settings.api_port,
         reload=(settings.app_env == "development"),
@@ -123,7 +125,7 @@ def list_running_research_tasks() -> None:
         print(f"{task['task_id']}  {task.get('step')}  {task.get('query')}")
 
 
-if __name__ == "__main__":
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Insight Agent")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -145,10 +147,18 @@ if __name__ == "__main__":
     cancel_parser.add_argument("task_id", help="Task UUID from list-running-research")
     subparsers.add_parser("list-running-research", help="List checkpointed running tasks and their UUIDs")
 
-    args = parser.parse_args()
+    return parser
 
-    if args.command == "serve":
-        main()
+
+def main(argv: list[str] | None = None) -> None:
+    """Dispatch the installed console command and ``python -m app.main`` CLI."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    # Preserve the historical no-argument behavior while allowing the
+    # installed entry point to dispatch all documented subcommands.
+    if args.command in (None, "serve"):
+        serve_api()
     elif args.command == "daily-discovery":
         asyncio.run(
             run_daily_discovery(
@@ -166,5 +176,7 @@ if __name__ == "__main__":
         cancel_research_task(args.task_id)
     elif args.command == "list-running-research":
         list_running_research_tasks()
-    else:
-        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
