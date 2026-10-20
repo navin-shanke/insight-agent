@@ -9,6 +9,8 @@ The application configuration resolved to `sqlite+aiosqlite:///./data/insight.db
 
 A disposable restored copy was upgraded from `35fd433a99c2` to Alembic head `b791c6a48d21`. It passed integrity, retained the essential pre-migration counts (`task_checkpoints` 25, `discoveries` 34, `discovery_sources` 34, `reports` 1, `sources` 4), and contained the lease/digest columns and `research_cancellations` table. The original remains at `35fd433a99c2` and has not been migrated.
 
+The disposable copy was not removed after the test because the cleanup command was rejected. It remains at `%TEMP%\insight-agent-safety-a4afbfcab3974fccb424ae18c9be11d6\migration-copy.sqlite3`; current read-only inspection confirms integrity `ok`, revision `b791c6a48d21`, and 12 tables. Its file owner matches the current Windows user. Whether another process has an open handle has not been verified, so do not delete it until that check is complete. This is an extra copy of the database, not the durable backup.
+
 ## Preconditions and stop writers
 
 Before migration or restore, stop the API, scheduler, and every background worker using this database. Confirm they have exited before proceeding. Do not terminate generic Python processes unless you have positively identified them as this application. The SQLite online backup API provides a consistent snapshot while SQLite is active; stopping writers is still required before migration or restore to prevent writes during the maintenance window. Never run Alembic against the configured original until the future authorization described below.

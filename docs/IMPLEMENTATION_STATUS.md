@@ -51,3 +51,7 @@ The test suite uses SQLite. No PostgreSQL service was available, and no CI check
 - **Budget limitation:** Ollama usage is known only after an invocation returns. If a single invocation exceeds the remaining token allowance, the excess cannot be prevented retroactively. Missing usage metadata fails closed before subsequent model work.
 - **Cancellation limitation:** cancellation is cooperative and observed at execution boundaries; it cannot terminate a synchronous request already executing. Request timeout bounds the wait for such an invocation.
 - Phase 5 remains ON HOLD. Phase 6 was not started.
++
+## Database safety gate follow-up (2026-10-21)
+
+A documentation-only handoff inspection freshly confirmed the configured original at revision 35fd433a99c2 (SQLite integrity check returned ok, 11 tables), and the durable backup exists and independently passes integrity at the same revision (11 tables). The backup remains outside the repository. The temporary migrated copy also still exists; it passes integrity at b791c6a48d21 and has 12 tables. Its ACL owner was the current Windows user. An open-handle check was not completed, so the file was deliberately left in place. No application database was migrated in this follow-up. See docs/ANTIGRAVITY_HANDOFF.md and docs/database-backup-and-migration.md.

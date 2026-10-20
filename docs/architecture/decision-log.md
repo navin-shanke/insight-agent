@@ -1,8 +1,8 @@
 # Architecture Decision Record — Insight Agent
 
 **Source of truth:** `INSIGHT_AGENT_MASTER_BLUEPRINT.md`
-**Status:** Phase 2 (Normalize Data and Connector Contracts) — decisions recorded below
-**Date:** 2026-10-19
+**Status:** Historical architecture decisions; current implementation state is in `docs/IMPLEMENTATION_STATUS.md` and `docs/ANTIGRAVITY_HANDOFF.md`.
+**Original decision date:** 2026-10-19
 
 ## ADR-001: Foundation selection — build fresh; candidates as design references only
 
@@ -77,6 +77,15 @@
 - Live Instagram test: requires explicit user authorization + permitted account/session (Blueprint rule 8); not yet run.
 - Candidate offline tests (`npm test` for Jev Social; `pytest` for Agent Reach/AI Search Agent; OpenMagpie connector tests) not yet executed — inspected statically only in Phase 0.
 
-## Next steps
-- Phase 0, 1, and 2 are complete and committed to GitHub.
-- Confirm with the user before beginning Phase 3 (bounded deep-research graph + claim verification).
+## ADR-006: Local-first file archive direction (planning only)
+
+**Decision:** Keep SQLite on local storage for structured records and active files/cache on local disk. Google Drive API is the preferred future archive for selected reports, valuable evidence, selected source documents, and versioned backup copies. The live SQLite database must not be placed in a synchronized Drive folder.
+
+**Status and boundary:** Planning direction only. No Google Drive API, OAuth, upload queue, or storage behavior changes are implemented or authorized. Any implementation requires separate user authorization. The database backup/migration safety procedure is documented in `docs/database-backup-and-migration.md`; the original database migration remains pending explicit authorization. PostgreSQL compatibility is unverified.
+
+## Current next steps
+
+- Validate the Antigravity handoff read-only and report discrepancies.
+- Keep Phase 5 ON HOLD until the user explicitly authorizes implementation.
+- Do not start Phase 6; it is not authorized.
+- Do not migrate the original SQLite database without explicit authorization.

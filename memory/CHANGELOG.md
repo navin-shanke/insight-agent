@@ -1,5 +1,17 @@
-# Insight Agent: Changelog
+# Insight Agent — Changelog and Handoff Notes
 
+## 2026-10-21 — Antigravity handoff package
+
+- Added root agent instructions and the Antigravity handoff/start-here documents.
+- Refreshed persistent memory summaries to replace pre-merge branch, API, and scheduler descriptions.
+- Recorded the verified database-safety state and retained the original-DB migration authorization boundary.
+- Updated the master blueprint with the completed backup/copy-test gate and the planning-only local-first Google Drive direction.
+- No application code, database, Drive, Telegram, Phase 5, or Phase 6 implementation was changed.
+- Last reported test evidence remains 23 focused DB integration tests and 86 full tests from the safety-gate work; not rerun for this documentation task.
+
+The remaining entries are historical notes, not a current status source. Consult docs/IMPLEMENTATION_STATUS.md and docs/ANTIGRAVITY_HANDOFF.md for current state.
+
+---
 All meaningful implementation changes, verified test results, commits, blockers, and handoffs are recorded below. Do not duplicate every conversation message.
 
 ## v0.4.0 — Phase 4: Daily Discovery Scheduler (in progress)

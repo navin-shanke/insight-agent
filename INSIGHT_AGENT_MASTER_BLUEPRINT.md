@@ -1488,6 +1488,14 @@ Verify retention policies. 9. Deploy and test scheduled execution.
 accurately, and execute a daily run without requiring the developer to
 manually start it.
 
+## Current operational verification note (2026-10-21)
+
+The Phase 3/4 implementation is recorded in docs/IMPLEMENTATION_STATUS.md. The database safety gate is complete for the backup and disposable-copy procedure only: the configured local SQLite database was at revision 35fd433a99c2; a verified backup was created; and a separate restored copy reached Alembic head b791c6a48d21 with integrity/schema checks. The original database remains at its pre-migration revision. Migrating that original is still pending explicit user authorization and is not implied by successful copy testing. PostgreSQL compatibility is unverified.
+
+The future local-first file-storage direction is SQLite on local disk for structured records, local disk for active files/cache, and Google Drive API for selected research archives and backup copies. This is a planning decision only; no Drive integration, OAuth, upload queue, or storage behavior change has been implemented or authorized. The live SQLite database must not be stored in a Google Drive synchronized folder.
+
+Phase 5 retains its explicit approval gate and remains ON HOLD. Phase 6 is NOT STARTED and is not authorized. A handoff and first-session instruction are in docs/ANTIGRAVITY_HANDOFF.md and docs/ANTIGRAVITY_START_HERE.md.
+
 ------------------------------------------------------------------------
 
 # Part XII --- Testing and Acceptance
