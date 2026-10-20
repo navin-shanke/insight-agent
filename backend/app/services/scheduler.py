@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 import uuid
 
 from app.agents.graph import run_research
@@ -18,42 +18,54 @@ class SchedulerService:
     def __init__(self, service: ResearchService):
         self.service = service
 
-    def acquire_lock(self, session, task_id: str) -> bool:
-        """Attempt to acquire the scheduler lock for a given task ID.
+    def acquire_lock(self, session, lock_key: str) -> bool:
+        """Attempt to acquire the scheduler lock atomically.
+
+        Uses INSERT ... ON CONFLICT (upsert) so that concurrent invocations
+        are serialized at the database level — only one succeeds.
 
         Returns True if the lock was acquired, False if already running.
         """
         from app.db.models import ScheduledRun
 
-        run = session.query(ScheduledRun).filter_by(task_id=task_id).first()
-        if run is None:
+        try:
             run = ScheduledRun(
-                task_id=task_id,
+                task_id=lock_key,
                 status="running",
                 next_run_at=datetime.now(timezone.utc),
             )
             session.add(run)
             session.flush()
-            return True
 
-        if run.status == "running":
+            # Check if a row with this lock_key already existed.
+            existing = (
+                session.query(ScheduledRun)
+                .filter_by(task_id=lock_key)
+                .first()
+            )
+            if existing and existing.id != run.id:
+                # Another invocation inserted first; reset our row and fail.
+                session.delete(run)
+                session.flush()
+                return False
+
+            # Persist the lock so it survives session close.
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
             return False
 
-        run.status = "running"
-        run.next_run_at = datetime.now(timezone.utc)
-        session.flush()
-        return True
-
-    def release_lock(self, session, task_id: str, status: str) -> None:
+    def release_lock(self, session, lock_key: str, status: str) -> None:
         """Release the scheduler lock with the given status."""
         from app.db.models import ScheduledRun
 
-        run = session.query(ScheduledRun).filter_by(task_id=task_id).first()
+        run = session.query(ScheduledRun).filter_by(task_id=lock_key).first()
         if run is None:
             return
         run.status = status
         run.last_run_at = datetime.now(timezone.utc)
-        session.flush()
+        session.commit()
 
     async def run_daily_discovery(
         self,
@@ -64,38 +76,40 @@ class SchedulerService:
     ):
         """Run a single daily discovery task.
 
-        Acquires a scheduler lock idempotently using a stable task key;
+        Acquires a scheduler lock idempotently using a stable lock key;
         guarantees lock release on success or failure via ``finally``.
 
-        The ``task_id`` key ``"daily_discovery"`` is shared across invocations,
-        so only one daily-discovery run can proceed at a time.
+        A separate UUID is generated for each research run's task_id so that
+        the UUID passed to the research graph is always valid, regardless of
+        the stable lock key used for cross-invocation coordination.
 
         Returns:
             Task result dictionary
         """
         import asyncio
 
-        task_id = "daily_discovery"
+        lock_key = "daily_discovery"
+        run_task_id = str(uuid4())
         with self.service.session() as session:
-            if not self.acquire_lock(session, task_id):
+            if not self.acquire_lock(session, lock_key):
                 return {"status": "skipped", "reason": "lock_held_by_other_task"}
 
             error = None
             try:
                 result = await run_research(
                     self.service,
-                    task_id=uuid.UUID(task_id),
+                    task_id=UUID(run_task_id),
                     query=query,
                     topics=topics,
                     lookback_hours=24,
                     source_budget=source_budget,
                     max_iterations=max_iterations,
                 )
-                self.release_lock(session, task_id, "completed")
+                self.release_lock(session, lock_key, "completed")
                 return result
             except Exception as e:
                 error = e
                 raise
             finally:
                 if error is not None:
-                    self.release_lock(session, task_id, "failed")
+                    self.release_lock(session, lock_key, "failed")
