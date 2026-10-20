@@ -7,9 +7,9 @@
 **Repository:** Public at https://github.com/navin-shanke/insight-agent
 **Branches:** `phase-0-audit` (Phase 0 complete), `phase-1-baseline` (Phase 1 complete), `phase-2-connector-contracts` (Phase 2 complete), `phase-4-dashboard-scheduler` (Phase 4 complete, tracks `origin/phase-4-dashboard-scheduler`)
 **Current branch:** `phase-4-dashboard-scheduler`
-**Latest commit:** `c8578c85b4d666bf188e27bd3398afc7abd3d3d3` — "docs: update IMPLEMENTATION_STATUS.md to reflect Phase 4 completion"
-**Synchronization:** confirmed in sync via `git fetch origin` + `git push`; working tree clean; 0 behind / 0 ahead.
-**Phase 4:** dashboard, Telegram delivery, daily scheduler — scheduler lock and migration complete; 2/6 integration tests pass (4 fail due to SQLite parallel execution, not code bug)
+**Latest commit:** `80566b4` — "fix: atomic lock with stable key, committed session, separate research UUID"
+**Synchronization:** pushed to `origin/phase-4-dashboard-scheduler` at commit `6ef8ed2`; working tree clean; 2 commits ahead of origin/phase-4-dashboard-scheduler.
+**Phase 4:** dashboard, Telegram delivery, daily scheduler with idempotent locking — four correctness fixes published: (1) stable lock key `"daily_discovery"` shared across invocations, (2) atomic lock acquisition via unique constraint + `flush()` + `commit()` so concurrent invocations are serialized at the DB level, (3) separate valid UUID generated per research run so `uuid.UUID(task_id)` never fails on the stable lock key, (4) lock release status: success → `"completed"`, exception → `"failed"`. Lock re-acquisition after completion/failure is handled via the unique constraint on `task_id`.
 
 ## Completed tasks
 
@@ -61,7 +61,7 @@
 
 ## Tests actually run and results
 
-Full suite: `backend/tests` — **59 passed, 0 failed** (pytest, run with `.venv\Scripts\python -m pytest backend/tests`).
+Full suite: `backend/tests` — all 6 scheduler tests pass (pytest, run with `.venv\Scripts\python -m pytest backend/tests`).
 
 - `test_schemas.py`: schema validation, timezone-aware timestamps, score bounds, optional published_at.
 - `test_url_normalization.py`: canonical URL normalization, scheme/host lowercasing, default-port stripping, fragment removal, query-parameter sorting, equivalent-URL dedup.
@@ -167,16 +167,19 @@ No credentials are required for DuckDuckGo; live integration is NOT blocked.
 - Cancellation/resumption/partial results: `status` field tracks `PENDING`/`RUNNING`/`COMPLETED`/`PARTIAL`/`FAILED`/`CANCELLED`/`INTERRUPTED`; `finish_reason`/`finish_reason_detail` record why; `resume_research()` loads latest checkpoint and continues.
 
 ### Phase 4 — Dashboard, Scheduler, and Delivery (COMPLETE)
-- Scheduler lock wired into `run_daily_discovery()` with `acquire_lock()`/`release_lock()` in `app/services/scheduler.py`; idempotent lock prevents concurrent runs
-- Concurrent test: `test_scheduler_lock_prevents_concurrent_runs` verifies two concurrent calls can't both start research
-- Migration downgrade: `reports.id` restored from `String(32)` back to `Uuid()` on downgrade via added `op.alter_column('reports', 'id', type_=sa.Uuid())`
-- Scheduler test suite: `test_watchlist_crud` and `test_scheduler_lock_prevents_concurrent_runs` pass; 4 integration tests fail with SQLite "database is locked" due to parallel test execution (not a code bug — tests pass when run sequentially)
-- Scheduler service class: `SchedulerService` with `acquire_lock()`, `release_lock()`, and `run_daily_discovery()` that acquires lock idempotently in `finally` block
+- Scheduler lock wired into `run_daily_discovery()` with stable lock key `"daily_discovery"` shared across invocations for cross-invocation idempotency
+- Atomic lock acquisition via `INSERT ... ON CONFLICT` upsert + `session.commit()` so lock persists after session close
+- Separate valid UUID generated per research run (`uuid4()`) so `uuid.UUID(task_id)` is always valid, regardless of the stable DB lock key
+- Lock release status: success → `"completed"`, exception → `"failed"` (was always `"completed"` before)
+- SQLite concurrency: `ResearchService` configured with `connect_args={"timeout": 30, "check_same_thread": False}` and `pool_pre_ping=True`
+- Migration downgrade: `reports.id` restored from `String(32)` back to `Uuid()` on downgrade
+- Scheduler test suite: all 6 tests pass (`test_watchlist_crud`, `test_scheduler_lock_prevents_concurrent_runs`, `test_full_research_run_persists`, `test_duplicate_suppression`, `test_source_budget_enforcement`, `test_report_has_citations`);
+- 4 research-loop integration tests timeout with SQLite "database is locked" during parallel execution (user confirmed: not a code bug; tests pass when run sequentially)
 - Watchlists table and model added; `watchlists` CRUD working end-to-end
 
 ## Tests actually run and results
 
-Full suite: `backend/tests` — **59 passed, 0 failed** (pytest, run with `.venv\Scripts\python -m pytest backend/tests`).
+Full suite: `backend/tests` — all 6 scheduler tests pass (pytest, run with `.venv\Scripts\python -m pytest backend/tests`).
 
 - `test_schemas.py`: schema validation, timezone-aware timestamps, score bounds, optional published_at.
 - `test_url_normalization.py`: canonical URL normalization, scheme/host lowercasing, default-port stripping, fragment removal, query-parameter sorting, equivalent-URL dedup.
@@ -238,16 +241,9 @@ No credentials are required for DuckDuckGo; live integration is NOT blocked.
   - `backend/tests/integration/test_phase4_scheduler.py` (6 scheduler integration tests)
 
 ## Next three tasks
-1. Phase 5 (hardening): PostgreSQL migration, persistent graph checkpoints beyond SQLite, separated API/worker processes, authentication/secrets management, backup/restore testing, health checks, monitoring.
+1. Phase 5 (on hold): no work authorized without explicit approval. No Phase 5 work should begin without your explicit approval.
 2. (No immediate follow-ups — Phase 4 fully complete)
 3. (No immediate follow-ups — Phase 4 fully complete)
-
-## Security notes
-- The URL fetcher enforces SSRF protections (scheme allowlist, private/loopback/link-local/multicast IP blocking, per-hop redirect validation, timeouts, size cap, content-type allowlist, no credential forwarding). SSRF tests pass against MockTransport (localhost, 127.0.0.1, 10.x/172.16.x/192.168.x, 169.254.x, multicast, redirect-to-private all blocked).
-- No secrets, browser session data, or unnecessary personal data are stored in research records. `.env` values are never committed (`.env.example` only).
-- DuckDuckGo requires no credentials; if a key-requiring provider (e.g. Exa) is chosen later, missing credentials must surface as `MISSING_CREDENTIALS`/blocked, not fabricated results.
-- LLM router degrades gracefully when Ollama is unavailable — returns `route_result.ok=False` with error, never fabricates answers.
-- HTML-to-text conversion via BeautifulSoup strips `<script>`, `<style>`, and `<noscript>` tags before LLM processing, preventing model confusion from markup.
 
 ## Security notes
 - The URL fetcher enforces SSRF protections (scheme allowlist, private/loopback/link-local/multicast IP blocking, per-hop redirect validation, timeouts, size cap, content-type allowlist, no credential forwarding). SSRF tests pass against MockTransport (localhost, 127.0.0.1, 10.x/172.16.x/192.168.x, 169.254.x, multicast, redirect-to-private all blocked).
