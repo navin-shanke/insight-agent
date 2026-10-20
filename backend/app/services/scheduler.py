@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.agents.graph import run_research
-from app.agents.service import ResearchService
+from app.agents.service import LeaseOwnershipLost, ResearchService
 from app.db.models import Discovery, DiscoverySource, ScheduledRun, Source, Watchlist
 
 
@@ -129,6 +129,27 @@ class SchedulerService:
         session.commit()
         return result.rowcount == 1
 
+    def fence_write(self, session, lock_key: str, owner_token: str) -> None:
+        """Acquire a lease-row write fence in the same transaction as research writes.
+
+        PostgreSQL holds the updated row lock through commit. SQLite serializes the
+        transaction's writes. Thus a takeover cannot pass this fence and then be
+        followed by a stale worker's persisted node results.
+        """
+        now = datetime.now(timezone.utc)
+        result = session.connection().execute(
+            update(ScheduledRun)
+            .where(
+                ScheduledRun.task_id == lock_key,
+                ScheduledRun.status == "running",
+                ScheduledRun.lease_owner == owner_token,
+                ScheduledRun.lease_expires_at > now,
+            )
+            .values(updated_at=now)
+        )
+        if result.rowcount != 1:
+            raise LeaseOwnershipLost("scheduler lease is no longer owned by this worker")
+
     def owns_lock(self, lock_key: str, owner_token: str) -> bool:
         now = datetime.now(timezone.utc)
         with self.service.session() as session:
@@ -156,6 +177,7 @@ class SchedulerService:
                 ScheduledRun.task_id == lock_key,
                 ScheduledRun.status == "running",
                 ScheduledRun.lease_owner == owner_token,
+                ScheduledRun.lease_expires_at > now,
             )
             .values(
                 status=status,
@@ -354,6 +376,7 @@ class SchedulerService:
                     deadline_at=deadline,
                     max_sources_inspected=self.max_investigations - total["sources_inspected"],
                     ownership_check=lambda: self.owns_lock(lock_key, owner),
+                    write_guard=lambda session: self.fence_write(session, lock_key, owner),
                 )
                 result["watchlist_name"] = _name
                 results.append(result)

@@ -8,13 +8,14 @@ Session and a DuckDuckGoConnector; callers pass it into each graph node.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from hashlib import sha256
 import re
 from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from app.db.models import Base, Source, ContentSnapshot, Claim, Evidence, Discovery, DiscoverySource, Report, TaskCheckpoint, ResearchCancellation
@@ -23,6 +24,13 @@ from app.schemas.source import SourceReference, AccessStatus
 from app.schemas.connector import DiscoveryRequest
 from app.llm.router import ModelRouter
 from app.schemas.research_state import VerificationStatus, TaskStatus
+
+
+class LeaseOwnershipLost(RuntimeError):
+    """Raised when a scheduler worker attempts a write after losing its lease."""
+
+
+_WRITE_GUARD: ContextVar[Optional[object]] = ContextVar("research_write_guard", default=None)
 
 
 def _now_utc() -> datetime:
@@ -52,6 +60,19 @@ class ResearchService:
     @contextmanager
     def session(self) -> Session:
         with Session(self.engine) as session:
+            write_guard = _WRITE_GUARD.get()
+            if write_guard is not None:
+                def fence_before_flush(db_session, _flush_context, _instances):
+                    if db_session.new or db_session.dirty or db_session.deleted:
+                        write_guard(db_session)
+
+                def fence_before_commit(db_session):
+                    # Also covers Core INSERT/UPDATE statements executed through
+                    # Session.execute(), which do not necessarily trigger flush.
+                    write_guard(db_session)
+
+                event.listen(session, "before_flush", fence_before_flush)
+                event.listen(session, "before_commit", fence_before_commit)
             yield session
 
     def request_cancellation(self, task_id: UUID | str) -> bool:

@@ -21,7 +21,7 @@ from uuid import UUID
 from langgraph.graph import StateGraph, END
 
 from app.schemas.research_state import ResearchState, TaskStatus, initial_state
-from app.agents.service import ResearchService
+from app.agents.service import LeaseOwnershipLost, ResearchService, _WRITE_GUARD
 from app.agents import nodes
 
 
@@ -188,11 +188,21 @@ async def _run_loop(
                     if node_task.cancelled():
                         break
                     raise
+                except LeaseOwnershipLost:
+                    stop_status, stop_reason = TaskStatus.INTERRUPTED, "scheduler_lease_lost"
+                    break
             if stop_status:
                 try:
                     await node_task
-                except asyncio.CancelledError:
+                except (asyncio.CancelledError, LeaseOwnershipLost):
                     pass
+                if stop_status == TaskStatus.INTERRUPTED:
+                    state.update(
+                        status=stop_status,
+                        finish_reason=stop_reason,
+                        finish_reason_detail="Database write fence rejected the stale scheduler owner",
+                    )
+                    return state
                 state.update(
                     status=stop_status,
                     finish_reason=stop_reason,
@@ -210,7 +220,15 @@ async def _run_loop(
                 )
                 session.commit()
                 return state
-            update = node_task.result()
+            try:
+                update = node_task.result()
+            except LeaseOwnershipLost:
+                state.update(
+                    status=TaskStatus.INTERRUPTED,
+                    finish_reason="scheduler_lease_lost",
+                    finish_reason_detail="Database rejected writes after scheduler lease ownership was lost",
+                )
+                return state
             if isinstance(update, dict):
                 state.update(update)
             elif update:
@@ -279,7 +297,15 @@ async def _run_loop(
                                         step="control_stop", state=dict(state))
                 session.commit()
                 return state
-            update = await nodes.build_report(service, state)
+            try:
+                update = await nodes.build_report(service, state)
+            except LeaseOwnershipLost:
+                state.update(
+                    status=TaskStatus.INTERRUPTED,
+                    finish_reason="scheduler_lease_lost",
+                    finish_reason_detail="Database rejected report writes after scheduler lease ownership was lost",
+                )
+                return state
             state.update(update or {})
             if any(
                 error.get("stage") == "build_report"
@@ -327,6 +353,7 @@ async def run_research(
     deadline_at=None,
     max_sources_inspected: int = 20,
     ownership_check=None,
+    write_guard=None,
     thread_id: Optional[str] = None,
 ) -> dict:
     """Run the research graph, persisting a checkpoint after each node.
@@ -363,7 +390,11 @@ async def run_research(
     # Build (but do not compile-with-checkpointer) the graph for structure.
     build_graph()
 
-    return await _run_loop(service, state, thread_id, task_id, ownership_check)
+    guard_token = _WRITE_GUARD.set(write_guard)
+    try:
+        return await _run_loop(service, state, thread_id, task_id, ownership_check)
+    finally:
+        _WRITE_GUARD.reset(guard_token)
 
 
 def resume_research(

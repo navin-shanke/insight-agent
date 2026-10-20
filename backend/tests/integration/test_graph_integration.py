@@ -199,6 +199,64 @@ def test_running_research_can_be_cancelled_and_checkpoints_status(svc, monkeypat
     assert checkpoint["status"] == TaskStatus.CANCELLED
 
 
+
+def test_lost_scheduler_owner_cannot_persist_node_results(svc, monkeypatch):
+    import asyncio
+    from app.agents import graph
+    from datetime import timedelta
+    from app.db.models import Report, ScheduledRun
+    from app.services.scheduler import SchedulerService
+    from sqlalchemy.orm import Session
+
+    scheduler = SchedulerService(svc)
+    owner = "old-worker"
+    lock_key = "daily_discovery"
+    now = datetime.now(timezone.utc)
+    with svc.session() as session:
+        session.add(ScheduledRun(
+            task_id=lock_key,
+            lease_owner=owner,
+            lease_expires_at=now + timedelta(minutes=2),
+            schedule_key="test",
+            next_run_at=now + timedelta(days=1),
+            status="running",
+        ))
+        session.commit()
+
+    async def stale_node(service, state):
+        # Model takeover after the pre-node ownership check but before a write.
+        # This separate session represents the worker that successfully took over.
+        with Session(service.engine) as session:
+            session.query(ScheduledRun).filter_by(task_id=lock_key).update({
+                ScheduledRun.lease_owner: "new-worker",
+                ScheduledRun.lease_expires_at: now + timedelta(minutes=5),
+            })
+            session.commit()
+        with service.session() as session:
+            service.add_report(
+                session,
+                title="stale result",
+                query="lease test",
+                body_md="must not persist",
+            )
+            session.commit()
+        return {}
+
+    monkeypatch.setitem(graph._NODE_FUNCS, "plan_research", stale_node)
+    final = asyncio.run(run_research(
+        svc,
+        task_id=uuid4(),
+        query="lease test",
+        ownership_check=lambda: scheduler.owns_lock(lock_key, owner),
+        write_guard=lambda session: scheduler.fence_write(session, lock_key, owner),
+    ))
+
+    assert final["status"] == TaskStatus.INTERRUPTED
+    assert final["finish_reason"] == "scheduler_lease_lost"
+    with svc.session() as session:
+        assert session.query(Report).filter_by(title="stale result").count() == 0
+
+
 def test_discovery_applies_publication_window_and_preserves_unknown_dates(svc):
     import asyncio
     from datetime import timedelta
