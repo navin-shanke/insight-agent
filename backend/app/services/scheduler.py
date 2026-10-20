@@ -64,15 +64,18 @@ class SchedulerService:
     ):
         """Run a single daily discovery task.
 
-        Acquires a scheduler lock idempotently; guarantees lock release on
-        success or failure via ``finally``.
+        Acquires a scheduler lock idempotently using a stable task key;
+        guarantees lock release on success or failure via ``finally``.
+
+        The ``task_id`` key ``"daily_discovery"`` is shared across invocations,
+        so only one daily-discovery run can proceed at a time.
 
         Returns:
             Task result dictionary
         """
         import asyncio
 
-        task_id = str(uuid4())
+        task_id = "daily_discovery"
         with self.service.session() as session:
             if not self.acquire_lock(session, task_id):
                 return {"status": "skipped", "reason": "lock_held_by_other_task"}
