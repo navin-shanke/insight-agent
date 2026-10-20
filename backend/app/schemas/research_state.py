@@ -71,6 +71,15 @@ class ResearchState(TypedDict, total=False):
     iteration: int
     max_iterations: int
     deadline_at: Optional[datetime]
+    max_sources_inspected: int
+    sources_discovered: int
+    sources_inspected: int
+    sources_succeeded: int
+    sources_failed: int
+    sources_unknown_publication_date: int
+    discovery_queries: int
+    discovery_failures: int
+    discovery_partial_results: int
 
     # ── durable object ids ─────────────────────────────────────────────
     candidate_source_ids: List[UUID]      # sources discovered, not yet inspected
@@ -100,6 +109,7 @@ def initial_state(
     spend_budget: float = 0.0,
     max_iterations: int = 5,
     deadline_at: Optional[datetime] = None,
+    max_sources_inspected: int = 20,
 ) -> ResearchState:
     """Build a fresh research state with all budgets initialized."""
     now = _now_utc()
@@ -114,6 +124,15 @@ def initial_state(
         "iteration": 0,
         "max_iterations": max_iterations,
         "deadline_at": deadline_at,
+        "max_sources_inspected": max_sources_inspected,
+        "sources_discovered": 0,
+        "sources_inspected": 0,
+        "sources_succeeded": 0,
+        "sources_failed": 0,
+        "sources_unknown_publication_date": 0,
+        "discovery_queries": 0,
+        "discovery_failures": 0,
+        "discovery_partial_results": 0,
         "candidate_source_ids": [],
         "inspected_source_ids": [],
         "discovery_ids": [],

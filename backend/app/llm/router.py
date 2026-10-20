@@ -141,6 +141,7 @@ class RouteResult:
     model: Optional[str] = None
     provider: Optional[str] = None
     latency_ms: Optional[int] = None
+    token_count: Optional[int] = None
 
 
 class ModelRouter:
@@ -181,6 +182,8 @@ class ModelRouter:
                     base_url=self.base_url,
                     temperature=self.temperature,
                     num_predict=1024,
+                    client_kwargs={"timeout": self.timeout_s},
+                    sync_client_kwargs={"timeout": self.timeout_s},
                 )
                 # Probe availability with a trivial call.
                 self._llm.invoke("OK")
@@ -207,20 +210,42 @@ class ModelRouter:
                 model=self.model,
             )
 
-        structured = llm.with_structured_output(schema, method="json_schema")
+        structured = llm.with_structured_output(schema, method="json_schema", include_raw=True)
         last_error: Optional[str] = None
+        total_tokens = 0
+        usage_complete = True
         for attempt in range(self.max_retries + 1):
             try:
-                data = structured.invoke(prompt)
+                response = structured.invoke(prompt)
+                if isinstance(response, dict) and "parsed" in response:
+                    data = response.get("parsed")
+                    raw = response.get("raw")
+                    usage = getattr(raw, "usage_metadata", None) or {}
+                    reported_tokens = usage.get("total_tokens")
+                    if reported_tokens is None and ("input_tokens" in usage or "output_tokens" in usage):
+                        reported_tokens = int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0))
+                    if reported_tokens is None:
+                        usage_complete = False
+                    else:
+                        total_tokens += int(reported_tokens)
+                    if data is None:
+                        raise ValueError(f"structured output parsing failed: {response.get('parsing_error')}")
+                else:
+                    data = response
+                    usage_complete = False
                 return RouteResult(
                     ok=True,
                     data=data,
                     provider="ollama",
                     model=self.model,
                     latency_ms=int((time.perf_counter() - start) * 1000),
+                    token_count=total_tokens if usage_complete else None,
                 )
             except Exception as exc:  # noqa: BLE001
                 last_error = f"{exc}"
+                # An exception can happen after an upstream model invocation;
+                # usage for that attempt is unknowable, so fail closed.
+                usage_complete = False
                 if attempt < self.max_retries:
                     continue
                 return RouteResult(

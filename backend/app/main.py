@@ -1,14 +1,9 @@
-"""FastAPI application entry point.
-
-Exposes health endpoints and API v1 routes. The research orchestration layer
-is intentionally not added until the baseline (database + health) is verified.
-"""
+"""FastAPI health application and CLI entry points for research workers."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import uuid
 
 from fastapi import FastAPI
 
@@ -54,35 +49,78 @@ def main() -> None:
 
 
 async def run_daily_discovery(
-    query: str = "daily discovery",
+    query: str | None = None,
     topics: list[str] | None = None,
     source_budget: int = 100,
     max_iterations: int = 5,
+    time_budget_seconds: int | None = None,
     token_budget: int = 50000,
 ) -> None:
-    """Run a single daily discovery task."""
-    from app.agents.graph import run_research
-
+    """Run bounded daily discovery through watchlists and scheduler locking."""
     from app.agents.service import ResearchService
+    from app.services.scheduler import SchedulerService
+    from app.core.config import get_settings
 
-    service = ResearchService(database_url="sqlite:///./data/insight.db")
-
-    state = await run_research(
-        service,
-        task_id=uuid.uuid4(),
+    settings = get_settings()
+    database_url = settings.database_url.replace("sqlite+aiosqlite:///", "sqlite:///")
+    service = ResearchService(database_url=database_url)
+    result = await SchedulerService(service).run_daily_discovery(
         query=query,
         topics=topics,
-        lookback_hours=24,
         source_budget=source_budget,
-        token_budget=token_budget,
         max_iterations=max_iterations,
+        time_budget_seconds=time_budget_seconds,
+        token_budget=token_budget,
     )
 
-    print(f"Daily discovery complete.")
-    print(f"  Status: {state.get('status')}")
-    print(f"  Discoveries: {len(state.get('discovery_ids', []))}")
-    print(f"  Claims: {len(state.get('claims', []))}")
-    print(f"  Report ID: {state.get('report_id')}")
+    print("Daily discovery finished.")
+    print(f"  Status: {result.get('status')}")
+    print(f"  Coverage: {result.get('coverage', {})}")
+    for run in result.get("runs", []):
+        if run.get("task_id"):
+            print(f"  Task UUID: {run['task_id']}")
+    if result.get("digest_md"):
+        print(result["digest_md"])
+
+
+async def run_daily_scheduler() -> None:
+    """Keep the daily Phase 4 worker scheduled at the configured local time."""
+    from app.agents.service import ResearchService
+    from app.services.scheduler import SchedulerService
+
+    settings = get_settings()
+    if not settings.daily_discovery_enabled:
+        raise RuntimeError("Daily discovery is disabled by DAILY_DISCOVERY_ENABLED")
+    database_url = settings.database_url.replace("sqlite+aiosqlite:///", "sqlite:///")
+    scheduler = SchedulerService(ResearchService(database_url=database_url))
+    await scheduler.run_forever(
+        hour=settings.daily_discovery_hour,
+        minute=settings.daily_discovery_minute,
+    )
+
+
+def cancel_research_task(task_id: str) -> None:
+    """Persist a cooperative cancellation request for a running task UUID."""
+    from app.agents.service import ResearchService
+
+    task_uuid = uuid.UUID(task_id)
+    settings = get_settings()
+    database_url = settings.database_url.replace("sqlite+aiosqlite:///", "sqlite:///")
+    accepted = ResearchService(database_url=database_url).request_cancellation(task_uuid)
+    print("Cancellation request recorded." if accepted else "Cancellation was already requested.")
+
+
+def list_running_research_tasks() -> None:
+    """Print durable running task IDs for the local cancel command."""
+    from app.agents.service import ResearchService
+
+    settings = get_settings()
+    database_url = settings.database_url.replace("sqlite+aiosqlite:///", "sqlite:///")
+    tasks = ResearchService(database_url=database_url).list_running_tasks()
+    if not tasks:
+        print("No running research tasks.")
+    for task in tasks:
+        print(f"{task['task_id']}  {task.get('step')}  {task.get('query')}")
 
 
 if __name__ == "__main__":
@@ -94,11 +132,18 @@ if __name__ == "__main__":
 
     # daily-discovery command
     pd = subparsers.add_parser("daily-discovery", help="Run a daily discovery task")
-    pd.add_argument("--query", default="daily discovery", help="Research query")
+    pd.add_argument("--query", default=None, help="Optional additional research query")
     pd.add_argument("--topics", nargs="*", default=None, help="Topics to research")
     pd.add_argument("--source-budget", type=int, default=100, help="Source budget")
     pd.add_argument("--max-iterations", type=int, default=5, help="Max iterations")
-    pd.add_argument("--token-budget", type=int, default=50000, help="Token budget")
+    pd.add_argument("--time-budget-seconds", type=int, default=None, help="Maximum run duration (capped at 45 minutes)")
+    pd.add_argument("--token-budget", type=int, default=50000, help="Maximum reported Ollama tokens across this run")
+
+    # long-running daily worker
+    subparsers.add_parser("scheduler", help="Run daily discovery every day at the configured local time")
+    cancel_parser = subparsers.add_parser("cancel-research", help="Cancel a running research job cooperatively")
+    cancel_parser.add_argument("task_id", help="Task UUID from list-running-research")
+    subparsers.add_parser("list-running-research", help="List checkpointed running tasks and their UUIDs")
 
     args = parser.parse_args()
 
@@ -111,8 +156,15 @@ if __name__ == "__main__":
                 topics=args.topics,
                 source_budget=args.source_budget,
                 max_iterations=args.max_iterations,
+                time_budget_seconds=args.time_budget_seconds,
                 token_budget=args.token_budget,
             )
         )
+    elif args.command == "scheduler":
+        asyncio.run(run_daily_scheduler())
+    elif args.command == "cancel-research":
+        cancel_research_task(args.task_id)
+    elif args.command == "list-running-research":
+        list_running_research_tasks()
     else:
         parser.print_help()

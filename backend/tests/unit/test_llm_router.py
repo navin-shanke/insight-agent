@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from unittest import mock
+from types import SimpleNamespace
 
 import pytest
 
@@ -153,3 +154,42 @@ def test_route_result_latency_recorded():
     with mock.patch.object(router, "_run", return_value=_make_route_result(expected)):
         result = router.plan_research("q", [])
     assert result.latency_ms == 100
+
+
+def test_llm_route_records_provider_token_usage():
+    router = ModelRouter()
+    expected = ResearchPlan(sub_topics=["x"], reasoning="r")
+
+    class Structured:
+        def invoke(self, _prompt):
+            return {
+                "parsed": expected,
+                "raw": SimpleNamespace(usage_metadata={"input_tokens": 12, "output_tokens": 8}),
+                "parsing_error": None,
+            }
+
+    class FakeLLM:
+        def with_structured_output(self, _schema, **kwargs):
+            assert kwargs["include_raw"] is True
+            return Structured()
+
+    router._get_llm = lambda: FakeLLM()
+    result = router._run("q", ResearchPlan, "test")
+    assert result.ok
+    assert result.token_count == 20
+
+
+def test_llm_route_marks_missing_token_usage_unknown():
+    router = ModelRouter()
+    expected = ResearchPlan(sub_topics=["x"], reasoning="r")
+
+    class Structured:
+        def invoke(self, _prompt):
+            return {"parsed": expected, "raw": SimpleNamespace(usage_metadata={}), "parsing_error": None}
+
+    class FakeLLM:
+        def with_structured_output(self, _schema, **_kwargs):
+            return Structured()
+
+    router._get_llm = lambda: FakeLLM()
+    assert router._run("q", ResearchPlan, "test").token_count is None

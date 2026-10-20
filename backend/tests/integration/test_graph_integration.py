@@ -55,7 +55,7 @@ def _make_fetch_result(url: str, text: str) -> FetchedContent:
 
 
 def _route_result(data):
-    return RouteResult(ok=True, data=data, provider="ollama", model="qwen", latency_ms=10)
+    return RouteResult(ok=True, data=data, provider="ollama", model="qwen", latency_ms=10, token_count=0)
 
 
 @pytest.fixture
@@ -165,6 +165,129 @@ def test_checkpoint_resume(svc):
     resumed = resume_research(svc, thread)
     assert resumed["status"] in (TaskStatus.COMPLETED, TaskStatus.PARTIAL)
     assert resumed["report_id"] is not None
+
+
+def test_running_research_can_be_cancelled_and_checkpoints_status(svc, monkeypatch):
+    import asyncio
+    from app.agents import graph
+
+    started = asyncio.Event()
+    task_id = uuid4()
+
+    async def wait_for_cancel(_service, _state):
+        started.set()
+        await asyncio.sleep(30)
+        return {}
+
+    monkeypatch.setitem(graph._NODE_FUNCS, "plan_research", wait_for_cancel)
+
+    async def scenario():
+        runner = asyncio.create_task(
+            run_research(svc, task_id=task_id, query="cancel me", max_iterations=3)
+        )
+        await started.wait()
+        assert svc.list_running_tasks()[0]["task_id"] == str(task_id)
+        assert svc.request_cancellation(task_id)
+        result = await asyncio.wait_for(runner, timeout=3)
+        return result
+
+    final = asyncio.run(scenario())
+    assert final["status"] == TaskStatus.CANCELLED
+    assert final["finish_reason"] == "user_requested"
+    with svc.session() as session:
+        checkpoint = svc.load_latest_checkpoint(session, str(task_id))
+    assert checkpoint["status"] == TaskStatus.CANCELLED
+
+
+def test_discovery_applies_publication_window_and_preserves_unknown_dates(svc):
+    import asyncio
+    from datetime import timedelta
+    from app.agents.nodes import discover_sources
+    from app.schemas.research_state import initial_state
+
+    now = datetime.now(timezone.utc)
+    records = [
+        SourceRecord(source_type="web_search", canonical_url="https://example.com/old",
+                     title="Old", published_at=now - timedelta(days=3)),
+        SourceRecord(source_type="web_search", canonical_url="https://example.com/new",
+                     title="New", published_at=now - timedelta(hours=2)),
+        SourceRecord(source_type="web_search", canonical_url="https://example.com/unknown",
+                     title="Unknown", published_at=None),
+    ]
+
+    async def discover(_request):
+        return DiscoveryResult(connector_name="test", query="topic", records=records)
+
+    svc.connector.discover = discover
+    state = initial_state(task_id=uuid4(), query="topic", lookback_hours=24, source_budget=2)
+    state["pending_leads"] = [{"query": "topic", "attempts": 0}]
+    result = asyncio.run(discover_sources(svc, state))
+    assert len(result["candidate_source_ids"]) == 2
+    assert result["sources_discovered"] == 2
+    assert result["sources_unknown_publication_date"] == 1
+    with svc.session() as session:
+        from app.db.models import Source
+
+        urls = {row.canonical_url for row in session.query(Source).all()}
+    assert "https://example.com/old" not in urls
+    assert urls == {"https://example.com/new", "https://example.com/unknown"}
+
+
+def test_expired_deadline_stops_before_research_nodes(svc, monkeypatch):
+    import asyncio
+    from app.agents import graph
+    from datetime import timedelta
+
+    async def should_not_run(*_args):
+        raise AssertionError("expired task executed a graph node")
+
+    monkeypatch.setitem(graph._NODE_FUNCS, "load_context", should_not_run)
+    final = asyncio.run(
+        run_research(
+            svc, task_id=uuid4(), query="budget", deadline_at=datetime.now(timezone.utc) - timedelta(seconds=1)
+        )
+    )
+    assert final["status"] == TaskStatus.PARTIAL
+    assert final["finish_reason"] == "deadline_exceeded"
+
+
+def test_active_node_is_cancelled_at_deadline(svc, monkeypatch):
+    import asyncio
+    from datetime import timedelta
+    from app.agents import graph
+
+    started = asyncio.Event()
+
+    async def slow_plan(*_args):
+        started.set()
+        await asyncio.sleep(10)
+
+    monkeypatch.setitem(graph._NODE_FUNCS, "plan_research", slow_plan)
+    final = asyncio.run(
+        run_research(
+            svc, task_id=uuid4(), query="timebox",
+            deadline_at=datetime.now(timezone.utc) + timedelta(seconds=0.15),
+        )
+    )
+    assert started.is_set()
+    assert final["status"] == TaskStatus.PARTIAL
+    assert final["finish_reason"] == "deadline_exceeded"
+
+
+def test_reported_token_budget_stops_before_next_research_node(svc):
+    import asyncio
+    from app.llm.router import ResearchPlan
+
+    svc.router.plan_research = lambda *_args: RouteResult(
+        ok=True, data=ResearchPlan(sub_topics=["lead"], reasoning="bounded"),
+        provider="ollama", model="test", token_count=10,
+    )
+    final = asyncio.run(
+        run_research(svc, task_id=uuid4(), query="budget", token_budget=10)
+    )
+    assert final["status"] == TaskStatus.PARTIAL
+    assert final["finish_reason"] == "token_budget_exhausted"
+    assert final["token_budget_remaining"] == 0
 
 
 def test_report_has_citations(svc):
