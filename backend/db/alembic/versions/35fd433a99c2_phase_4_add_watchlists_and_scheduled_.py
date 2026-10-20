@@ -68,4 +68,5 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_scheduled_runs_next_run_at'), table_name='scheduled_runs')
     op.drop_index(op.f('ix_scheduled_runs_created_at'), table_name='scheduled_runs')
     op.drop_table('scheduled_runs')
+    op.alter_column('reports', 'id', type_=sa.Uuid())
     # ### end Alembic commands ###

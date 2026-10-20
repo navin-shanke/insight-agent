@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
-import uuid as _uuid
+import uuid
 
 from app.agents.graph import run_research
 from app.agents.service import ResearchService
+from app.db.models import ScheduledRun
 
 
 class SchedulerService:
@@ -63,17 +64,29 @@ class SchedulerService:
     ):
         """Run a single daily discovery task.
 
+        Acquires a scheduler lock idempotently; guarantees lock release on
+        success or failure via ``finally``.
+
         Returns:
             Task result dictionary
         """
+        import asyncio
+
         task_id = str(uuid4())
-        result = await run_research(
-            self.service,
-            task_id=_uuid.UUID(task_id),
-            query=query,
-            topics=topics,
-            lookback_hours=24,
-            source_budget=source_budget,
-            max_iterations=max_iterations,
-        )
-        return result
+        with self.service.session() as session:
+            if not self.acquire_lock(session, task_id):
+                return {"status": "skipped", "reason": "lock_held_by_other_task"}
+
+            try:
+                result = await run_research(
+                    self.service,
+                    task_id=uuid.UUID(task_id),
+                    query=query,
+                    topics=topics,
+                    lookback_hours=24,
+                    source_budget=source_budget,
+                    max_iterations=max_iterations,
+                )
+                return result
+            finally:
+                self.release_lock(session, task_id, "completed")
