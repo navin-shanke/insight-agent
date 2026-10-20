@@ -39,7 +39,11 @@ def upgrade() -> None:
     op.create_index(op.f('ix_scheduled_runs_status'), 'scheduled_runs', ['status'], unique=False)
     op.create_index(op.f('ix_scheduled_runs_updated_at'), 'scheduled_runs', ['updated_at'], unique=False)
     op.create_index('ix_scheduled_runs_task_id', 'scheduled_runs', ['task_id'], unique=True)
-    op.alter_column('reports', 'id', type_=sa.String(32))
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("reports") as batch_op:
+            batch_op.alter_column("id", type_=sa.String(32), existing_type=sa.Uuid())
+    else:
+        op.alter_column('reports', 'id', type_=sa.String(32), existing_type=sa.Uuid())
     op.create_table('watchlists',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sa.String(length=255), nullable=False),
@@ -68,5 +72,9 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_scheduled_runs_next_run_at'), table_name='scheduled_runs')
     op.drop_index(op.f('ix_scheduled_runs_created_at'), table_name='scheduled_runs')
     op.drop_table('scheduled_runs')
-    op.alter_column('reports', 'id', type_=sa.Uuid())
+    if op.get_bind().dialect.name == "sqlite":
+        with op.batch_alter_table("reports") as batch_op:
+            batch_op.alter_column("id", type_=sa.Uuid(), existing_type=sa.String(32))
+    else:
+        op.alter_column('reports', 'id', type_=sa.Uuid(), existing_type=sa.String(32))
     # ### end Alembic commands ###

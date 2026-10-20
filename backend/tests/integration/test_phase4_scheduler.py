@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from uuid import uuid4
 from unittest import mock
 
@@ -182,6 +184,49 @@ def test_scheduler_lock_prevents_concurrent_runs(db_engine):
         # Now it should be acquirable again
         result3 = scheduler.acquire_lock(session, "daily_discovery")
         assert result3 is True
+
+
+@pytest.mark.parametrize("initial_status", [None, "completed", "failed"])
+def test_only_one_independent_session_claims_lock_concurrently(db_engine, initial_status):
+    """Initial claims and terminal-row reacquisition must serialize in the DB."""
+    svc = ResearchService(database_url=db_engine.url)
+    scheduler = SchedulerService(svc)
+    if initial_status is not None:
+        with svc.session() as session:
+            from app.db.models import ScheduledRun
+
+            session.add(ScheduledRun(
+                task_id="contended",
+                status=initial_status,
+                next_run_at=datetime.now(timezone.utc),
+            ))
+            session.commit()
+
+    barrier = Barrier(2)
+
+    def claim():
+        with svc.session() as session:
+            barrier.wait()
+            return scheduler.acquire_lock(session, "contended")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda _: claim(), range(2)))
+    assert sorted(outcomes) == [False, True]
+
+
+def test_expired_running_lock_can_be_recovered(db_engine):
+    svc = ResearchService(database_url=db_engine.url)
+    scheduler = SchedulerService(svc)
+    with svc.session() as session:
+        from app.db.models import ScheduledRun
+
+        session.add(ScheduledRun(
+            task_id="stale",
+            status="running",
+            next_run_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        ))
+        session.commit()
+        assert scheduler.acquire_lock(session, "stale") is True
 
 
 def test_full_research_run_persists(db_engine):

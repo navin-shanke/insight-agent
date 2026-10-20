@@ -7,6 +7,7 @@ with persistence and checkpoint/resume.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from unittest import mock
 from uuid import UUID, uuid4
@@ -123,13 +124,13 @@ def test_full_research_run_persists(svc):
     _mock_router(svc)
 
     tid = uuid4()
-    final = run_research(
+    final = asyncio.run(run_research(
         svc,
         task_id=tid,
         query="What is the price of the new tool?",
         topics=["pricing"],
         max_iterations=3,
-    )
+    ))
 
     assert final["status"] in (TaskStatus.COMPLETED, TaskStatus.PARTIAL)
     assert final["report_id"] is not None
@@ -151,13 +152,13 @@ def test_checkpoint_resume(svc):
 
     tid = uuid4()
     thread = f"resume-{tid}"
-    final = run_research(
+    final = asyncio.run(run_research(
         svc,
         task_id=tid,
         query="What is the price of the new tool?",
         thread_id=thread,
         max_iterations=3,
-    )
+    ))
     assert final["report_id"] is not None
 
     # Resume from the same thread: should load latest checkpoint and complete.
@@ -171,7 +172,7 @@ def test_report_has_citations(svc):
     _mock_router(svc)
 
     tid = uuid4()
-    final = run_research(svc, task_id=tid, query="price?", max_iterations=3)
+    final = asyncio.run(run_research(svc, task_id=tid, query="price?", max_iterations=3))
     # The report body references findings; claims were persisted with source URLs.
     with svc.session() as session:
         from app.db.models import Claim, Evidence, Report, Discovery
