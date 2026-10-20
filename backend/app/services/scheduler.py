@@ -25,10 +25,30 @@ class SchedulerService:
         are serialized at the database level — only one succeeds.
 
         Returns True if the lock was acquired, False if already running.
+        After a lock is released (status → "completed" or "failed"), it can
+        be re-acquired.
         """
         from app.db.models import ScheduledRun
 
         try:
+            # Check first if an existing row exists for this lock key.
+            existing = (
+                session.query(ScheduledRun)
+                .filter_by(task_id=lock_key)
+                .first()
+            )
+
+            if existing:
+                if existing.status == "running":
+                    # Lock is held by another invocation.
+                    return False
+                # Lock was previously released (completed/failed); reuse the row.
+                existing.status = "running"
+                existing.next_run_at = datetime.now(timezone.utc)
+                session.commit()
+                return True
+
+            # No existing row — create one.
             run = ScheduledRun(
                 task_id=lock_key,
                 status="running",
@@ -36,18 +56,6 @@ class SchedulerService:
             )
             session.add(run)
             session.flush()
-
-            # Check if a row with this lock_key already existed.
-            existing = (
-                session.query(ScheduledRun)
-                .filter_by(task_id=lock_key)
-                .first()
-            )
-            if existing and existing.id != run.id:
-                # Another invocation inserted first; reset our row and fail.
-                session.delete(run)
-                session.flush()
-                return False
 
             # Persist the lock so it survives session close.
             session.commit()
