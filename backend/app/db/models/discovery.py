@@ -62,6 +62,7 @@ class Discovery(Base):
     novelty_score: Mapped[Optional[float]] = mapped_column(Integer, nullable=True)
     evidence_quality_score: Mapped[Optional[float]] = mapped_column(Integer, nullable=True)
     usefulness_score: Mapped[Optional[float]] = mapped_column(Integer, nullable=True)
+    dedupe_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

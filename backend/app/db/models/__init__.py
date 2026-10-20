@@ -14,6 +14,7 @@ from .report import Report
 from .checkpoint import TaskCheckpoint
 from .watchlist import Watchlist
 from .scheduled_run import ScheduledRun
+from .cancellation import ResearchCancellation
 
 __all__ = [
     "Base",
@@ -28,5 +29,6 @@ __all__ = [
     "TaskCheckpoint",
     "Watchlist",
     "ScheduledRun",
+    "ResearchCancellation",
 ]
 

@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from app.agents.graph import _route_after_decide
+from app.agents.nodes import decide_next
 from app.schemas.research_state import TaskStatus, initial_state
 
 
@@ -50,3 +51,12 @@ def test_route_decide_iteration_limit_completes():
     state["pending_leads"] = []
     # Iteration limit takes precedence over remaining candidates.
     assert _route_after_decide(state) == "report"
+
+
+def test_iteration_limit_is_enforced_as_partial():
+    state = initial_state(task_id=uuid4(), query="q", max_iterations=1)
+    state["candidate_source_ids"] = ["src-1"]
+    result = __import__("asyncio").run(decide_next(None, state))
+    assert result["status"] == TaskStatus.PARTIAL
+    assert result["iteration"] == 1
+    assert result["finish_reason"] == "iteration_limit"

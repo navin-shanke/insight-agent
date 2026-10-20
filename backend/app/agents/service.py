@@ -8,19 +8,29 @@ Session and a DuckDuckGoConnector; callers pass it into each graph node.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
+from hashlib import sha256
+import re
 from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
-from app.db.models import Base, Source, ContentSnapshot, Claim, Evidence, Discovery, DiscoverySource, Report, TaskCheckpoint
+from app.db.models import Base, Source, ContentSnapshot, Claim, Evidence, Discovery, DiscoverySource, Report, TaskCheckpoint, ResearchCancellation
 from app.connectors import DuckDuckGoConnector
 from app.schemas.source import SourceReference, AccessStatus
 from app.schemas.connector import DiscoveryRequest
 from app.llm.router import ModelRouter
 from app.schemas.research_state import VerificationStatus, TaskStatus
+
+
+class LeaseOwnershipLost(RuntimeError):
+    """Raised when a scheduler worker attempts a write after losing its lease."""
+
+
+_WRITE_GUARD: ContextVar[Optional[object]] = ContextVar("research_write_guard", default=None)
 
 
 def _now_utc() -> datetime:
@@ -50,7 +60,99 @@ class ResearchService:
     @contextmanager
     def session(self) -> Session:
         with Session(self.engine) as session:
+            write_guard = _WRITE_GUARD.get()
+            if write_guard is not None:
+                def fence_before_flush(db_session, _flush_context, _instances):
+                    if db_session.new or db_session.dirty or db_session.deleted:
+                        write_guard(db_session)
+
+                def fence_before_commit(db_session):
+                    # Also covers Core INSERT/UPDATE statements executed through
+                    # Session.execute(), which do not necessarily trigger flush.
+                    write_guard(db_session)
+
+                event.listen(session, "before_flush", fence_before_flush)
+                event.listen(session, "before_commit", fence_before_commit)
             yield session
+
+    def request_cancellation(self, task_id: UUID | str) -> bool:
+        """Persist an idempotent cancellation request for a running task."""
+        import json
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        dialect = self.engine.dialect.name
+        insert_fn = {"sqlite": sqlite_insert, "postgresql": pg_insert}.get(dialect)
+        if insert_fn is None:
+            raise NotImplementedError(f"Cancellation is unsupported for {dialect!r}")
+        with self.session() as session:
+            checkpoint = (
+                session.query(TaskCheckpoint)
+                .filter_by(task_id=str(task_id))
+                .order_by(TaskCheckpoint.created_at.desc())
+                .first()
+            )
+            if checkpoint is None or checkpoint.step in ("build_report", "control_stop"):
+                return False
+            checkpoint_status = json.loads(checkpoint.state_json).get("status")
+            if checkpoint_status not in (TaskStatus.RUNNING, TaskStatus.COMPLETED, TaskStatus.PARTIAL):
+                return False
+            result = session.execute(
+                insert_fn(ResearchCancellation)
+                .values(task_id=str(task_id))
+                .on_conflict_do_nothing(index_elements=[ResearchCancellation.task_id])
+            )
+            session.commit()
+            return result.rowcount == 1
+
+    def list_running_tasks(self) -> list[dict]:
+        """Return the latest durable checkpoint for each currently running task."""
+        import json
+
+        with self.session() as session:
+            rows = (
+                session.query(TaskCheckpoint)
+                .filter(TaskCheckpoint.task_id.is_not(None))
+                .order_by(TaskCheckpoint.created_at.desc())
+                .all()
+            )
+            tasks = {}
+            for row in rows:
+                if row.task_id in tasks:
+                    continue
+                state = json.loads(row.state_json)
+                if row.step not in ("build_report", "control_stop") and state.get("status") in (
+                    TaskStatus.RUNNING, TaskStatus.COMPLETED, TaskStatus.PARTIAL
+                ):
+                    tasks[row.task_id] = {
+                        "task_id": row.task_id,
+                        "query": state.get("query"),
+                        "step": row.step,
+                        "updated_at": row.created_at.isoformat(),
+                    }
+            return list(tasks.values())
+
+    def cancellation_requested(self, session: Session, task_id: UUID | str) -> bool:
+        return (
+            session.query(ResearchCancellation.id)
+            .filter_by(task_id=str(task_id))
+            .first()
+            is not None
+        )
+
+    def consume_cancellation(self, session: Session, task_id: UUID | str) -> bool:
+        request = session.query(ResearchCancellation).filter_by(task_id=str(task_id)).first()
+        if request is None:
+            session.commit()
+            return False
+        session.delete(request)
+        session.commit()
+        return True
+
+    def clear_cancellation(self, task_id: UUID | str) -> None:
+        with self.session() as session:
+            session.query(ResearchCancellation).filter_by(task_id=str(task_id)).delete()
+            session.commit()
 
     # ── source persistence ─────────────────────────────────────────────
     def upsert_source(
@@ -207,19 +309,37 @@ class ResearchService:
         evidence_quality_score: Optional[int] = None,
         usefulness_score: Optional[int] = None,
     ) -> Discovery:
-        disc = Discovery(
-            title=title,
-            summary=summary,
-            category=category,
-            verification_status=verification_status,
-            relevance_score=relevance_score,
-            novelty_score=novelty_score,
-            evidence_quality_score=evidence_quality_score,
-            usefulness_score=usefulness_score,
+        identity = summary.removeprefix("Claim: ") or title
+        normalized = re.sub(r"\W+", " ", identity.casefold(), flags=re.UNICODE).strip()
+        dedupe_key = sha256(f"{(category or '').casefold()}\0{normalized}".encode()).hexdigest()
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        insert_fn = {"sqlite": sqlite_insert, "postgresql": pg_insert}.get(
+            session.get_bind().dialect.name
         )
-        session.add(disc)
-        session.flush()
-        return disc
+        if insert_fn is None:
+            raise NotImplementedError("Discovery deduplication supports SQLite and PostgreSQL")
+        discovery_id = uuid4()
+        result = session.execute(
+            insert_fn(Discovery)
+            .values(
+                id=discovery_id,
+                title=title,
+                summary=summary,
+                category=category,
+                verification_status=verification_status,
+                relevance_score=relevance_score,
+                novelty_score=novelty_score,
+                evidence_quality_score=evidence_quality_score,
+                usefulness_score=usefulness_score,
+                dedupe_key=dedupe_key,
+            )
+            .on_conflict_do_nothing(index_elements=[Discovery.dedupe_key])
+        )
+        if result.rowcount == 1:
+            return session.query(Discovery).filter_by(id=discovery_id).one()
+        return session.query(Discovery).filter_by(dedupe_key=dedupe_key).one()
 
     def link_discovery_source(
         self,
@@ -229,6 +349,14 @@ class ResearchService:
         source_id: UUID,
         link_type: str = "cites",
     ) -> DiscoverySource:
+        existing = session.query(DiscoverySource).filter_by(
+            discovery_id=discovery_id, source_id=source_id
+        ).first()
+        if existing:
+            if link_type:
+                existing.link_type = link_type
+            session.flush()
+            return existing
         link = DiscoverySource(
             discovery_id=discovery_id,
             source_id=source_id,

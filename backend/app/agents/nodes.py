@@ -29,6 +29,22 @@ def _source_url(rec) -> str:
     return getattr(rec, "canonical_url", "") or str(rec.get("canonical_url", "")) if isinstance(rec, dict) else ""
 
 
+def _token_budget_update(state: ResearchState, result, stage: str) -> dict:
+    """Charge reported provider usage; fail closed when usage telemetry is absent."""
+    remaining = max(0, int(state.get("token_budget_remaining", 0)))
+    used = getattr(result, "token_count", None)
+    errors = list(state.get("errors", []))
+    if used is None:
+        remaining = 0
+        errors.append({
+            "stage": stage,
+            "error": "Model provider did not report token usage; remaining model budget set to zero",
+        })
+    else:
+        remaining = max(0, remaining - max(0, int(used)))
+    return {"token_budget_remaining": remaining, "errors": errors}
+
+
 # ---------------------------------------------------------------------------
 # 1. load_context
 # ---------------------------------------------------------------------------
@@ -36,7 +52,7 @@ async def load_context(service: ResearchService, state: ResearchState) -> dict:
     """Mark the run as started."""
     return {
         "status": TaskStatus.RUNNING,
-        "iteration": int(state.get("iteration", 0)) + 1,
+        "iteration": int(state.get("iteration", 0)),
     }
 
 
@@ -51,7 +67,7 @@ async def plan_research(service: ResearchService, state: ResearchState) -> dict:
     result = service.plan_research(query, topics)
     leads: list[dict] = []
     if result.ok and result.data:
-        for sub in result.data.sub_topics:
+        for sub in result.data.sub_topics[:20]:
             leads.append(
                 {
                     "lead_id": str(uuid4()),
@@ -74,9 +90,7 @@ async def plan_research(service: ResearchService, state: ResearchState) -> dict:
 
     return {
         "pending_leads": leads,
-        "token_budget_remaining": max(
-            0, int(state.get("token_budget_remaining", 0)) - (result.latency_ms or 0) // 100
-        ),
+        **_token_budget_update(state, result, "plan_research"),
     }
 
 
@@ -94,42 +108,77 @@ async def discover_sources(service: ResearchService, state: ResearchState) -> di
         return {"candidate_source_ids": list(candidates)}
 
     new_candidate_ids: list = []
-    fetched_count = 0
+    discovered_count = 0
+    unknown_dates = int(state.get("sources_unknown_publication_date", 0))
+    errors = list(state.get("errors", []))
+    discovery_queries = int(state.get("discovery_queries", 0))
+    discovery_failures = int(state.get("discovery_failures", 0))
+    partial_results = int(state.get("discovery_partial_results", 0))
+    cutoff = None
+    if state.get("lookback_hours"):
+        from datetime import timedelta
+        cutoff = _now_utc() - timedelta(hours=int(state["lookback_hours"]))
     processed_leads: list = []
 
     with service.session() as session:
         for lead in list(leads):
             lead["attempts"] = int(lead.get("attempts", 0)) + 1
             query = lead["query"]
-            source_budget = int(state.get("source_budget_remaining", 0)) - fetched_count
+            source_budget = int(state.get("source_budget_remaining", 0)) - discovered_count
             if source_budget <= 0:
                 # Budget exhausted; keep this lead for a later retry.
                 if int(lead["attempts"]) < 2:
                     processed_leads.append(lead)
                 continue
-            max_results = min(8, source_budget)
+            # Search up to the connector's bounded page size; out-of-window
+            # results do not consume the candidate budget, allowing the query
+            # to fill the available budget with eligible records.
+            max_results = 8
             try:
                 result = await service.discover_sources(query, max_results)
+                discovery_queries += 1
             except Exception as exc:  # noqa: BLE001
                 # Search failure; keep lead for retry.
+                errors.append({"stage": "discover", "query": query, "error": str(exc)})
+                discovery_failures += 1
+                discovery_queries += 1
                 if int(lead["attempts"]) < 2:
                     processed_leads.append(lead)
                 continue
-            fetched_count += 1
-            if result.complete and result.records:
-                for rec in result.records:
+            if result.records:
+                for rec in result.records[:max_results]:
+                    published_at = getattr(rec, "published_at", None)
+                    if published_at is not None:
+                        if published_at.tzinfo is None:
+                            published_at = published_at.replace(tzinfo=timezone.utc)
+                        if cutoff and published_at < cutoff:
+                            continue
+                    else:
+                        unknown_dates += 1
                     url = str(rec.canonical_url)
                     src = service.upsert_source(
                         session,
                         source_type=rec.source_type,
                         canonical_url=url,
                         title=rec.title,
+                        published_at=published_at,
                         access_status=AccessStatus.READY,
                         metadata={},
                     )
                     if str(src.id) not in candidates:
+                        if discovered_count >= source_budget:
+                            break
                         candidates.add(str(src.id))
                         new_candidate_ids.append(str(src.id))
+                        discovered_count += 1
+            for failure in getattr(result, "failures", []):
+                discovery_failures += 1
+                errors.append({"stage": "discover", "query": query, "error": failure.reason,
+                               "access_status": str(failure.access_status)})
+            for warning in getattr(result, "warnings", []):
+                errors.append({"stage": "discover", "query": query, "warning": str(warning)})
+            if not getattr(result, "complete", True):
+                partial_results += 1
             session.commit()
             # Lead has been processed successfully; remove it from pending leads.
             processed_leads.append(lead)
@@ -140,10 +189,13 @@ async def discover_sources(service: ResearchService, state: ResearchState) -> di
     return {
         "pending_leads": remaining_leads,
         "candidate_source_ids": list(candidates),
-        "source_budget_remaining": max(
-            0, int(state.get("source_budget_remaining", 0)) - fetched_count
-        ),
-        "errors": list(state.get("errors", [])),
+        "source_budget_remaining": max(0, int(state.get("source_budget_remaining", 0)) - discovered_count),
+        "sources_discovered": int(state.get("sources_discovered", 0)) + discovered_count,
+        "sources_unknown_publication_date": unknown_dates,
+        "discovery_queries": discovery_queries,
+        "discovery_failures": discovery_failures,
+        "discovery_partial_results": partial_results,
+        "errors": errors,
     }
 
 
@@ -180,6 +232,8 @@ async def inspect_content(service: ResearchService, state: ResearchState) -> dic
             return {
                 "candidate_source_ids": candidates,
                 "inspected_source_ids": list(inspected | {source_id_str}),
+                "sources_inspected": int(state.get("sources_inspected", 0)) + 1,
+                "sources_failed": int(state.get("sources_failed", 0)) + 1,
             }
         canonical_url = source.canonical_url
 
@@ -201,6 +255,8 @@ async def inspect_content(service: ResearchService, state: ResearchState) -> dic
             return {
                 "candidate_source_ids": candidates,
                 "inspected_source_ids": list(inspected),
+                "sources_inspected": int(state.get("sources_inspected", 0)) + 1,
+                "sources_succeeded": int(state.get("sources_succeeded", 0)) + 1,
                 "last_fetched": {
                     "source_id": str(source_id_str),
                     "url": canonical_url,
@@ -220,6 +276,8 @@ async def inspect_content(service: ResearchService, state: ResearchState) -> dic
             return {
                 "candidate_source_ids": candidates,
                 "inspected_source_ids": list(inspected),
+                "sources_inspected": int(state.get("sources_inspected", 0)) + 1,
+                "sources_failed": int(state.get("sources_failed", 0)) + 1,
                 "last_fetched": None,
                 "errors": list(state.get("errors", []))
                 + [
@@ -286,6 +344,7 @@ async def extract_claims(service: ResearchService, state: ResearchState) -> dict
 
     return {
         "claims": new_claims,
+        **_token_budget_update(state, result, "extract_claims"),
         "errors": list(state.get("errors", []))
         + ([{"stage": "extract_claims", "error": result.error}] if not result.ok else []),
     }
@@ -302,8 +361,12 @@ async def verify_claims(service: ResearchService, state: ResearchState) -> dict:
         return {"claims": claims}
 
     updated = list(claims)
+    token_remaining = int(state.get("token_budget_remaining", 0))
+    usage_errors = []
     with service.session() as session:
         for claim in unverified[:5]:  # bound verification per run
+            if token_remaining <= 0:
+                break
             claim_uuid = UUID(claim["claim_id"])
             result = service.verify_claim(
                 claim_text=claim["claim_text"],
@@ -311,6 +374,13 @@ async def verify_claims(service: ResearchService, state: ResearchState) -> dict:
                 evidence_text=f"Source: {claim.get('source_url','')}",
                 evidence_urls=[claim.get("source_url", "")],
             )
+            updated_state = _token_budget_update(
+                {**state, "token_budget_remaining": token_remaining, "errors": []},
+                result,
+                "verify_claims",
+            )
+            token_remaining = updated_state["token_budget_remaining"]
+            usage_errors.extend(updated_state["errors"])
             if result.ok and result.data:
                 service.update_claim_verification(
                     session,
@@ -332,7 +402,8 @@ async def verify_claims(service: ResearchService, state: ResearchState) -> dict:
 
     return {
         "claims": updated,
-        "errors": list(state.get("errors", [])),
+        "token_budget_remaining": token_remaining,
+        "errors": list(state.get("errors", [])) + usage_errors,
     }
 
 
@@ -366,7 +437,8 @@ async def score_discoveries(service: ResearchService, state: ResearchState) -> d
                     source_id=UUID(claim["source_id"]),
                     link_type="cites",
                 )
-                new_disc_ids.append(str(disc.id))
+                if str(disc.id) not in new_disc_ids:
+                    new_disc_ids.append(str(disc.id))
         session.commit()
 
     return {
@@ -379,7 +451,7 @@ async def score_discoveries(service: ResearchService, state: ResearchState) -> d
 # ---------------------------------------------------------------------------
 async def decide_next(service: ResearchService, state: ResearchState) -> dict:
     """Decide whether to inspect another candidate, re-plan, or finish."""
-    iteration = int(state.get("iteration", 0))
+    iteration = int(state.get("iteration", 0)) + 1
     max_iterations = int(state.get("max_iterations", 5))
     source_budget = int(state.get("source_budget_remaining", 0))
     candidates = state.get("candidate_source_ids", []) or []
@@ -387,13 +459,15 @@ async def decide_next(service: ResearchService, state: ResearchState) -> dict:
 
     if iteration >= max_iterations:
         return {
-            "status": TaskStatus.COMPLETED,
+            "iteration": iteration,
+            "status": TaskStatus.PARTIAL,
             "finish_reason": "iteration_limit",
             "finish_reason_detail": f"Reached max iterations ({max_iterations})",
             "_route": "report",
         }
     if source_budget <= 0 and not candidates and not leads:
         return {
+            "iteration": iteration,
             "status": TaskStatus.PARTIAL,
             "finish_reason": "source_budget_exhausted",
             "finish_reason_detail": "Source budget exhausted with no work remaining",
@@ -401,16 +475,17 @@ async def decide_next(service: ResearchService, state: ResearchState) -> dict:
         }
     if not candidates and not leads:
         return {
+            "iteration": iteration,
             "status": TaskStatus.COMPLETED,
             "finish_reason": "no_more_leads",
             "finish_reason_detail": "No candidate sources or pending leads remain",
             "_route": "report",
         }
     if candidates:
-        return {"status": TaskStatus.RUNNING, "_route": "inspect"}
+        return {"status": TaskStatus.RUNNING, "iteration": iteration, "_route": "inspect"}
     if leads:
-        return {"status": TaskStatus.RUNNING, "_route": "plan"}
-    return {"status": TaskStatus.COMPLETED, "_route": "report"}
+        return {"status": TaskStatus.RUNNING, "iteration": iteration, "_route": "plan"}
+    return {"status": TaskStatus.COMPLETED, "iteration": iteration, "_route": "report"}
 
 
 # ---------------------------------------------------------------------------
@@ -473,4 +548,5 @@ async def build_report(service: ResearchService, state: ResearchState) -> dict:
     return {
         "report_id": report_id,
         "report_body": body_md,
+        **_token_budget_update(state, result, "build_report"),
     }

@@ -41,12 +41,20 @@ def test_alembic_upgrade_head_creates_all_tables():
             pass
 
 
-def test_alembic_check_no_model_drift():
+def test_alembic_check_no_model_drift(tmp_path):
     """Ensure ORM models match the migrated schema (no pending autogenerate diff)."""
+    database_path = tmp_path / "migration-check.db"
+    env = dict(os.environ)
+    env["DATABASE_URL"] = f"sqlite:///{database_path.as_posix()}"
+    upgrade = subprocess.run(
+        ["alembic", "upgrade", "head"], capture_output=True, text=True, env=env
+    )
+    assert upgrade.returncode == 0, upgrade.stderr
     result = subprocess.run(
         ["alembic", "check"],
         capture_output=True,
         text=True,
+        env=env,
     )
     assert result.returncode == 0, (
         "ORM models and migrated schema are out of sync. "
