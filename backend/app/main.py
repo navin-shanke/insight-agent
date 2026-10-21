@@ -1,4 +1,10 @@
-"""FastAPI health application and CLI entry points for research workers."""
+"""FastAPI application factory and CLI entry points for research workers.
+
+Phase 5 additions:
+- CORS middleware for the Vite dashboard frontend
+- Full Phase 5 REST API mounted under /api/v1
+- Improved /health/ready that probes real dependencies
+"""
 
 from __future__ import annotations
 
@@ -7,6 +13,7 @@ import asyncio
 import uuid
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 
@@ -21,15 +28,56 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.api_v1_prefix}/openapi.json",
     )
 
+    # CORS -- allow the Vite dev server and any configured production origin
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            settings.frontend_origin,
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Phase 5 REST API
+    from app.api.v1.router import router as api_router
+    app.include_router(api_router)
+
     @app.get("/health/live", tags=["health"])
     async def health_live() -> dict[str, str]:
-        """Liveness probe — indicates the application process is running."""
+        """Liveness probe -- indicates the application process is running."""
         return {"status": "alive"}
 
     @app.get("/health/ready", tags=["health"])
     async def health_ready() -> dict[str, str]:
-        """Readiness probe — indicates the application can serve requests."""
-        return {"status": "ready"}
+        """Readiness probe -- probes real dependencies.
+
+        Returns 'degraded' when Ollama or DuckDuckGo are unavailable rather
+        than a constant success response.
+        """
+        import httpx
+        checks: dict[str, str] = {}
+
+        # Ollama probe
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(f"{settings.ollama_base_url}/api/tags")
+                checks["ollama"] = "ready" if r.status_code == 200 else "unavailable"
+        except Exception:
+            checks["ollama"] = "unavailable"
+
+        # DuckDuckGo probe
+        try:
+            from app.connectors.duckduckgo import DuckDuckGoConnector
+            h = DuckDuckGoConnector().health()
+            checks["duckduckgo"] = "ready" if h.get("status") == "READY" else "unavailable"
+        except Exception:
+            checks["duckduckgo"] = "unavailable"
+
+        all_ready = all(v == "ready" for v in checks.values())
+        return {"status": "ready" if all_ready else "degraded", **checks}
 
     return app
 
@@ -138,8 +186,14 @@ def build_parser() -> argparse.ArgumentParser:
     pd.add_argument("--topics", nargs="*", default=None, help="Topics to research")
     pd.add_argument("--source-budget", type=int, default=100, help="Source budget")
     pd.add_argument("--max-iterations", type=int, default=5, help="Max iterations")
-    pd.add_argument("--time-budget-seconds", type=int, default=None, help="Maximum run duration (capped at 45 minutes)")
-    pd.add_argument("--token-budget", type=int, default=50000, help="Maximum reported Ollama tokens across this run")
+    pd.add_argument(
+        "--time-budget-seconds", type=int, default=None,
+        help="Maximum run duration (capped at 45 minutes)",
+    )
+    pd.add_argument(
+        "--token-budget", type=int, default=50000,
+        help="Maximum reported Ollama tokens across this run",
+    )
 
     # long-running daily worker
     subparsers.add_parser("scheduler", help="Run daily discovery every day at the configured local time")

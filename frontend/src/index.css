@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: #0B0D12;
+    color: #F1F5F9;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #11151E;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #1E2535;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #2D3748;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-bg-card border border-border rounded-card p-4;
+  }
+
+  .btn-primary {
+    @apply bg-accent hover:bg-accent-hover text-white font-medium px-4 py-2 rounded-button transition-colors duration-150;
+  }
+
+  .btn-ghost {
+    @apply text-text-secondary hover:text-text-primary hover:bg-bg-elevated px-3 py-2 rounded-button transition-colors duration-150;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-badge text-xs font-medium;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
