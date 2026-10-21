@@ -62,6 +62,10 @@ build/
 *.sqlite3
 data/
 *.json
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.json
+!frontend/tsconfig*.json
 
 # Browser profiles & sessions
 private/browser/
