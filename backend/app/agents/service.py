@@ -473,7 +473,15 @@ class ResearchService:
         evidence_summary: str,
         contradictions: str,
         limitations: str,
+        unique_sources_count: Optional[int] = None,
+        total_discoveries_count: Optional[int] = None,
     ):
         return self.router.synthesize_report(
-            query, findings_summary, evidence_summary, contradictions, limitations
+            query,
+            findings_summary,
+            evidence_summary,
+            contradictions,
+            limitations,
+            unique_sources_count=unique_sources_count,
+            total_discoveries_count=total_discoveries_count,
         )

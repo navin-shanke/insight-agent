@@ -9,6 +9,8 @@ or citations (Blueprint rule 4).
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
+from urllib.parse import urlparse
 from uuid import UUID, uuid4
 
 from app.agents.service import ResearchService
@@ -18,12 +20,50 @@ from app.schemas.research_state import (
     VerificationStatus,
 )
 from app.schemas.connector import AccessStatus
-from app.db.models import Source
+from app.db.models import Source, Evidence
 
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
+
+
+
+def _normalize_claim_tokens(text: str) -> set[str]:
+    return set(re.findall(r"\b[a-z0-9]{3,}\b", text.casefold()))
+
+
+def _claims_are_duplicates(text1: str, text2: str) -> bool:
+    if not text1 or not text2:
+        return False
+    norm1 = re.sub(r"\W+", " ", text1.casefold()).strip()
+    norm2 = re.sub(r"\W+", " ", text2.casefold()).strip()
+    if norm1 == norm2:
+        return True
+    tokens1 = _normalize_claim_tokens(text1)
+    tokens2 = _normalize_claim_tokens(text2)
+    if not tokens1 or not tokens2:
+        return False
+    intersection = len(tokens1 & tokens2)
+    union = len(tokens1 | tokens2)
+    jaccard = intersection / union if union else 0.0
+    min_len = min(len(tokens1), len(tokens2))
+    overlap = intersection / min_len if min_len else 0.0
+    return jaccard >= 0.65 or (overlap >= 0.85 and min_len >= 4)
+
+
+def _clean_markdown_report(text: str) -> str:
+    if not text:
+        return ""
+    # Strip backslash escapes: \#, \*, \_, \[, \], \(, \)
+    cleaned = re.sub(r"\\([#*_`\[\]()])", r"\1", text)
+    # Strip ClaimVerdict. enum string leaks
+    cleaned = re.sub(r"ClaimVerdict\.([A-Z_]+)", r"\1", cleaned)
+    # Strip stray HTML/SVG blocks or tags
+    cleaned = re.sub(r"<svg[\s\S]*?</svg>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<svg\b[^>]*>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^\s*svg\s*$", "", cleaned, flags=re.MULTILINE | re.IGNORECASE)
+    return cleaned.strip()
 
 def _source_url(rec) -> str:
     return getattr(rec, "canonical_url", "") or str(rec.get("canonical_url", "")) if isinstance(rec, dict) else ""
@@ -221,12 +261,47 @@ async def inspect_content(service: ResearchService, state: ResearchState) -> dic
     if not candidates:
         return {"candidate_source_ids": [], "inspected_source_ids": list(inspected)}
 
-    source_id_str = candidates.pop(0)
+    def _domain(url_str: str) -> str:
+        try:
+            return urlparse(url_str).netloc.lower()
+        except Exception:
+            return ""
 
-    from app.db.models import Source
-
-    source_uuid = UUID(source_id_str)
+    source_id_str = candidates[0]
     with service.session() as session:
+        cand_sources = (
+            session.query(Source).filter(Source.id.in_([UUID(cid) for cid in candidates])).all()
+        )
+        if len(candidates) > 1 and cand_sources:
+            inspected_sources = (
+                session.query(Source).filter(Source.id.in_([UUID(iid) for iid in inspected])).all()
+                if inspected
+                else []
+            )
+            inspected_domains = set()
+            domain_counts = {}
+            for s in inspected_sources:
+                dom = _domain(s.canonical_url)
+                if dom:
+                    inspected_domains.add(dom)
+                    domain_counts[dom] = domain_counts.get(dom, 0) + 1
+
+            src_map = {str(s.id): s for s in cand_sources}
+
+            def _candidate_rank(cid: str):
+                s = src_map.get(cid)
+                if not s:
+                    return (999, 999)
+                dom = _domain(s.canonical_url)
+                if not dom:
+                    return (500, 500)
+                return (1 if dom in inspected_domains else 0, domain_counts.get(dom, 0))
+
+            sorted_candidates = sorted(candidates, key=_candidate_rank)
+            source_id_str = sorted_candidates[0]
+
+        candidates.remove(source_id_str)
+        source_uuid = UUID(source_id_str)
         source = session.query(Source).filter_by(id=source_uuid).first()
         if not source:
             return {
@@ -307,39 +382,63 @@ async def extract_claims(service: ResearchService, state: ResearchState) -> dict
 
     new_claims = list(state.get("claims", [])) or []
     if result.ok and result.data:
-        from app.db.models import Source
-
         source_uuid = UUID(fetched["source_id"])
         with service.session() as session:
             source = session.query(Source).filter_by(id=source_uuid).first()
             for c in result.data.claims:
-                claim = service.add_claim(
-                    session,
-                    source_id=source_uuid,
-                    claim_text=c.claim_text,
-                    claim_type=c.claim_type,
-                    confidence_rationale=(
-                        f"Extracted from {fetched['url']}; excerpt: {c.excerpt}"
-                    ),
-                )
-                service.add_evidence(
-                    session,
-                    claim_id=claim.id,
-                    source_id=source_uuid,
-                    excerpt=c.excerpt or "",
-                    stance="contextualizes",
-                    quality_notes="Extracted from source content",
-                )
-                new_claims.append(
-                    {
-                        "claim_id": str(claim.id),
-                        "claim_text": c.claim_text,
-                        "claim_type": c.claim_type,
-                        "source_id": fetched["source_id"],
-                        "source_url": fetched["url"],
-                        "verification_status": VerificationStatus.UNVERIFIED,
-                    }
-                )
+                # Deduplication check against existing claims
+                dup_claim = None
+                for existing in new_claims:
+                    if _claims_are_duplicates(existing.get("claim_text", ""), c.claim_text):
+                        dup_claim = existing
+                        break
+
+                if dup_claim is not None:
+                    service.add_evidence(
+                        session,
+                        claim_id=UUID(dup_claim["claim_id"]),
+                        source_id=source_uuid,
+                        excerpt=c.excerpt or "",
+                        stance="contextualizes",
+                        quality_notes=f"Corroborating source: {fetched['url']}",
+                    )
+                    corrob = dup_claim.setdefault("corroborating_urls", [dup_claim["source_url"]])
+                    if fetched["url"] not in corrob:
+                        corrob.append(fetched["url"])
+                    excerpts = dup_claim.setdefault("excerpts", [dup_claim.get("excerpt", "")])
+                    if c.excerpt and c.excerpt not in excerpts:
+                        excerpts.append(c.excerpt)
+                else:
+                    claim = service.add_claim(
+                        session,
+                        source_id=source_uuid,
+                        claim_text=c.claim_text,
+                        claim_type=c.claim_type,
+                        confidence_rationale=(
+                            f"Extracted from {fetched['url']}; excerpt: {c.excerpt}"
+                        ),
+                    )
+                    service.add_evidence(
+                        session,
+                        claim_id=claim.id,
+                        source_id=source_uuid,
+                        excerpt=c.excerpt or "",
+                        stance="contextualizes",
+                        quality_notes="Extracted from source content",
+                    )
+                    new_claims.append(
+                        {
+                            "claim_id": str(claim.id),
+                            "claim_text": c.claim_text,
+                            "claim_type": c.claim_type,
+                            "source_id": fetched["source_id"],
+                            "source_url": fetched["url"],
+                            "excerpt": c.excerpt or "",
+                            "excerpts": [c.excerpt or ""],
+                            "corroborating_urls": [fetched["url"]],
+                            "verification_status": VerificationStatus.UNVERIFIED,
+                        }
+                    )
             session.commit()
 
     return {
@@ -364,15 +463,55 @@ async def verify_claims(service: ResearchService, state: ResearchState) -> dict:
     token_remaining = int(state.get("token_budget_remaining", 0))
     usage_errors = []
     with service.session() as session:
-        for claim in unverified[:5]:  # bound verification per run
+        for claim in unverified[:15]:  # bound verification per step
             if token_remaining <= 0:
                 break
             claim_uuid = UUID(claim["claim_id"])
+
+            evidence_records = (
+                session.query(Evidence, Source)
+                .join(Source, Evidence.source_id == Source.id)
+                .filter(Evidence.claim_id == claim_uuid)
+                .all()
+            )
+            evidence_snippets = []
+            evidence_urls = list(claim.get("corroborating_urls", []))
+            for ev, src in evidence_records:
+                if ev.excerpt:
+                    evidence_snippets.append(f"Source: {src.canonical_url}\nExcerpt: {ev.excerpt}")
+                if src.canonical_url and src.canonical_url not in evidence_urls:
+                    evidence_urls.append(src.canonical_url)
+
+            if not evidence_snippets:
+                for exc in claim.get("excerpts", [claim.get("excerpt", "")]):
+                    if exc:
+                        evidence_snippets.append(f"Source: {claim.get('source_url', '')}\nExcerpt: {exc}")
+                if claim.get("source_url") and claim.get("source_url") not in evidence_urls:
+                    evidence_urls.append(claim.get("source_url"))
+
+            evidence_text = "\n\n".join(evidence_snippets).strip()
+
+            if not evidence_text:
+                verdict_str = VerificationStatus.INSUFFICIENT_EVIDENCE
+                rationale_str = "No specific factual passages retrieved from source content to substantiate claim."
+                service.update_claim_verification(
+                    session,
+                    claim_id=claim_uuid,
+                    verification_status=verdict_str,
+                    confidence_rationale=rationale_str,
+                )
+                for c in updated:
+                    if c["claim_id"] == claim["claim_id"]:
+                        c["verification_status"] = verdict_str
+                        c["verification_rationale"] = rationale_str
+                        break
+                continue
+
             result = service.verify_claim(
                 claim_text=claim["claim_text"],
                 claim_type=claim.get("claim_type", "statement"),
-                evidence_text=f"Source: {claim.get('source_url','')}",
-                evidence_urls=[claim.get("source_url", "")],
+                evidence_text=evidence_text,
+                evidence_urls=evidence_urls,
             )
             updated_state = _token_budget_update(
                 {**state, "token_budget_remaining": token_remaining, "errors": []},
@@ -382,16 +521,20 @@ async def verify_claims(service: ResearchService, state: ResearchState) -> dict:
             token_remaining = updated_state["token_budget_remaining"]
             usage_errors.extend(updated_state["errors"])
             if result.ok and result.data:
+                verdict_val = result.data.verdict
+                verdict_str = getattr(verdict_val, "value", str(verdict_val))
+                verdict_str = str(verdict_str).removeprefix("ClaimVerdict.").strip()
+                rationale_str = result.data.rationale or ""
                 service.update_claim_verification(
                     session,
                     claim_id=claim_uuid,
-                    verification_status=result.data.verdict,
-                    confidence_rationale=result.data.rationale,
+                    verification_status=verdict_str,
+                    confidence_rationale=rationale_str,
                 )
                 for c in updated:
                     if c["claim_id"] == claim["claim_id"]:
-                        c["verification_status"] = result.data.verdict
-                        c["verification_rationale"] = result.data.rationale
+                        c["verification_status"] = verdict_str
+                        c["verification_rationale"] = rationale_str
                         break
             else:
                 for c in updated:
@@ -421,6 +564,7 @@ async def score_discoveries(service: ResearchService, state: ResearchState) -> d
             status = claim.get("verification_status")
             if status in (
                 VerificationStatus.SUPPORTED,
+                VerificationStatus.PARTIALLY_SUPPORTED,
                 VerificationStatus.MIXED_EVIDENCE,
                 VerificationStatus.UNVERIFIED,
             ):
@@ -497,21 +641,57 @@ async def build_report(service: ResearchService, state: ResearchState) -> dict:
     discovery_ids = state.get("discovery_ids", []) or []
     claims = list(state.get("claims", []) or [])
 
-    findings_lines = []
+    unique_sources = set()
+    verified_findings = []
+    unverified_findings = []
     contradictions = []
-    for c in claims:
-        findings_lines.append(
-            f"- {c.get('claim_text')} (verification: {c.get('verification_status')})"
-        )
-        if c.get("verification_status") == VerificationStatus.CONTRADICTED:
-            contradictions.append(c.get("claim_text"))
+    evidence_rows = []
 
-    findings_summary = "\n".join(findings_lines) or "No claims extracted."
-    evidence_summary = "Evidence linked to source records via claim->source evidence table."
+    for c in claims:
+        txt = c.get("claim_text", "")
+        status = str(c.get("verification_status", "UNVERIFIED")).removeprefix("ClaimVerdict.")
+        src = c.get("source_url", "")
+        if src:
+            unique_sources.add(src)
+        for u in c.get("corroborating_urls", []):
+            if u:
+                unique_sources.add(u)
+        rationale = c.get("verification_rationale", "")
+
+        entry = f"- {txt}"
+        if src:
+            entry += f" (Source: [{src.split('//')[-1][:35]}]({src}))"
+        if rationale:
+            entry += f"\n  Verification rationale: {rationale}"
+
+        if status in (VerificationStatus.SUPPORTED, VerificationStatus.PARTIALLY_SUPPORTED):
+            verified_findings.append(entry)
+        elif status in (VerificationStatus.CONTRADICTED, VerificationStatus.MIXED_EVIDENCE):
+            contradictions.append(entry)
+        else:
+            unverified_findings.append(entry)
+
+        src_display = f"[{src.split('//')[-1][:30]}]({src})" if src else "N/A"
+        evidence_rows.append(f"| {txt[:80]} | {status} | {src_display} | {rationale[:100] if rationale else 'N/A'} |")
+
+    findings_sections = []
+    if verified_findings:
+        findings_sections.append("### Key Verified Findings\n" + "\n".join(verified_findings))
+    if unverified_findings:
+        findings_sections.append("### Unverified / Insufficient Evidence Claims\n" + "\n".join(unverified_findings))
+    findings_summary = "\n\n".join(findings_sections) or "No claims extracted."
+
+    table_header = "| Claim | Status | Source | Verification Notes |\n|---|---|---|---|\n"
+    evidence_summary = (
+        f"Analyzed {len(unique_sources)} unique source URLs across {len(claims)} extracted claims.\n\n"
+        + table_header
+        + ("\n".join(evidence_rows) if evidence_rows else "| None | - | - | - |")
+    )
+
     contradictions_summary = "\n".join(contradictions) or "None detected."
     limitations = (
-        "Single web-search provider (DuckDuckGo); claim verification limited to "
-        "retrieved source text; ranking is not verification."
+        f"Analysis based on {len(unique_sources)} unique sources retrieved via DuckDuckGo web search. "
+        "Claim verification evaluated against retrieved snapshot text; ranking is not verification."
     )
 
     result = service.synthesize_report(
@@ -520,15 +700,25 @@ async def build_report(service: ResearchService, state: ResearchState) -> dict:
         evidence_summary=evidence_summary,
         contradictions=contradictions_summary,
         limitations=limitations,
+        unique_sources_count=len(unique_sources),
+        total_discoveries_count=len(discovery_ids),
     )
 
     body_md = ""
     if result.ok and result.data:
-        body_md = result.data.report_md
+        body_md = _clean_markdown_report(result.data.report_md)
     else:
-        body_md = (
-            f"# Research Report\n\nQuery: {query}\n\n"
-            f"Report generation failed: {result.error}\n\n## Findings\n{findings_summary}\n"
+        body_md = _clean_markdown_report(
+            f"# Research Report: {query}\n\n"
+            f"**Research Question:** {query}\n\n"
+            f"**Synthesis Note:** Structured LLM synthesis unavailable ({result.error or 'fallback'}). Compiled from verified graph records:\n\n"
+            f"## Key Verified Findings\n"
+            + ("\n".join(verified_findings) if verified_findings else "_No conclusively verified findings._\n")
+            + f"\n\n## Unverified Claims\n"
+            + ("\n".join(unverified_findings) if unverified_findings else "_None._\n")
+            + (f"\n\n## Contradictions\n" + "\n".join(contradictions) if contradictions else "")
+            + f"\n\n## Evidence Ledger\n\n{evidence_summary}\n\n"
+            f"## Research Limitations\n{limitations}\n"
         )
 
     report_id = None
@@ -540,7 +730,7 @@ async def build_report(service: ResearchService, state: ResearchState) -> dict:
             body_md=body_md,
             limitations=limitations,
             task_id=state.get("task_id"),
-            discovery_ids=[__import__("uuid").UUID(d) for d in discovery_ids if d],
+            discovery_ids=[UUID(d) for d in discovery_ids if d],
         )
         report_id = str(rep.id)
         session.commit()

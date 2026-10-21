@@ -53,6 +53,7 @@ def test_state_has_required_fields():
 
 def test_verification_status_values():
     assert VerificationStatus.SUPPORTED == "SUPPORTED"
+    assert VerificationStatus.PARTIALLY_SUPPORTED == "PARTIALLY_SUPPORTED"
     assert VerificationStatus.CONTRADICTED == "CONTRADICTED"
     assert VerificationStatus.MIXED_EVIDENCE == "MIXED_EVIDENCE"
     assert VerificationStatus.INSUFFICIENT_EVIDENCE == "INSUFFICIENT_EVIDENCE"

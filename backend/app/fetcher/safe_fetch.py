@@ -93,7 +93,7 @@ def is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
 def html_to_text(html: str) -> str:
     """Convert HTML to plain text, stripping scripts, styles, and markup."""
     soup = BeautifulSoup(html, "html.parser")
-    for tag in soup(["script", "style", "noscript"]):
+    for tag in soup(["script", "style", "noscript", "svg", "canvas", "iframe"]):
         tag.decompose()
     text = soup.get_text(separator=" ", strip=True)
     return " ".join(text.split())

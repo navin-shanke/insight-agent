@@ -70,6 +70,7 @@ class ClaimExtraction(BaseModel):
 
 class ClaimVerdict(str, Enum):
     SUPPORTED = "SUPPORTED"
+    PARTIALLY_SUPPORTED = "PARTIALLY_SUPPORTED"
     CONTRADICTED = "CONTRADICTED"
     MIXED_EVIDENCE = "MIXED_EVIDENCE"
     INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
@@ -80,7 +81,7 @@ class ClaimVerification(BaseModel):
     """Verification of one claim against independent evidence."""
 
     verdict: ClaimVerdict = Field(
-        ..., description="SUPPORTED | CONTRADICTED | MIXED_EVIDENCE | INSUFFICIENT_EVIDENCE | UNVERIFIABLE"
+        ..., description="SUPPORTED | PARTIALLY_SUPPORTED | CONTRADICTED | MIXED_EVIDENCE | INSUFFICIENT_EVIDENCE | UNVERIFIABLE"
     )
     rationale: str = Field(
         ..., description="Why this verdict was reached, citing evidence URLs."
@@ -162,12 +163,14 @@ class ModelRouter:
         temperature: float = 0.0,
         max_retries: int = 2,
         timeout_s: float = 60.0,
+        num_predict: int = 4096,
     ):
         self.model = model or os.getenv("OLLAMA_TEXT_MODEL") or DEFAULT_MODEL
         self.base_url = base_url or os.getenv("OLLAMA_BASE_URL") or DEFAULT_BASE_URL
         self.temperature = temperature
         self.max_retries = max_retries
         self.timeout_s = timeout_s
+        self.num_predict = num_predict
         self._llm: Optional[ChatOllama] = None
         self._available: Optional[bool] = None
 
@@ -181,7 +184,7 @@ class ModelRouter:
                     model=self.model,
                     base_url=self.base_url,
                     temperature=self.temperature,
-                    num_predict=1024,
+                    num_predict=self.num_predict,
                     client_kwargs={"timeout": self.timeout_s},
                     sync_client_kwargs={"timeout": self.timeout_s},
                 )
@@ -306,11 +309,19 @@ class ModelRouter:
         """Verify one claim against gathered evidence."""
         urls_line = "\n".join(f"- {u}" for u in evidence_urls) if evidence_urls else "(none)"
         prompt = (
-            "You verify a factual claim against gathered evidence. Return a verdict "
-            "(SUPPORTED | CONTRADICTED | MIXED_EVIDENCE | INSUFFICIENT_EVIDENCE | UNVERIFIABLE), "
-            "a rationale citing evidence URLs, and the primary source URL if one exists. "
-            "Do not treat multiple sites repeating the same claim as independent confirmation. "
-            "Do not fabricate evidence or sources.\n\n"
+            "You are a strict, objective fact-checking verifier. Evaluate the claim strictly against the provided evidence text.\n"
+            "Verdict options:\n"
+            "- SUPPORTED: The provided evidence text directly and explicitly confirms all material elements of the claim.\n"
+            "- PARTIALLY_SUPPORTED: The evidence text confirms parts of the claim, but key details are unverified, speculative, or overstated.\n"
+            "- CONTRADICTED: The evidence text directly refutes the claim.\n"
+            "- MIXED_EVIDENCE: Sources provide conflicting claims with credible arguments on both sides.\n"
+            "- INSUFFICIENT_EVIDENCE: The evidence text mentions the topic or keywords but does NOT contain specific factual proof confirming the claim, OR evidence text is missing/empty.\n"
+            "- UNVERIFIABLE: The claim is subjective, speculative, or inherently cannot be verified.\n\n"
+            "CRITICAL VERIFICATION RULES:\n"
+            "1. NEVER mark SUPPORTED merely because the topic matches or the source URL exists. The specific assertion MUST be explicitly confirmed in 'Evidence text'.\n"
+            "2. If 'Evidence text' lacks supporting passages or is empty, you MUST return INSUFFICIENT_EVIDENCE.\n"
+            "3. Do not treat multiple search results echoing a single press release or original source as independent confirmation.\n"
+            "4. Do not fabricate facts, quotes, or sources.\n\n"
             f"Claim: {claim_text}\n"
             f"Claim type: {claim_type}\n"
             f"Evidence URLs:\n{urls_line}\n\n"
@@ -345,19 +356,35 @@ class ModelRouter:
         evidence_summary: str,
         contradictions: str,
         limitations: str,
+        unique_sources_count: Optional[int] = None,
+        total_discoveries_count: Optional[int] = None,
     ) -> RouteResult:
         """Synthesize a structured, cited research report."""
+        sources_info = ""
+        if unique_sources_count is not None:
+            sources_info = f"\nAnalyzed Sources: {unique_sources_count} unique sources across {total_discoveries_count or 0} discoveries.\n"
         prompt = (
-            "You write a structured, cited research report. Include: the research question, "
-            "key findings with supporting evidence and source URLs, contradictory evidence, "
-            "unresolved questions, and limitations. Every material factual claim must have "
-            "traceable supporting evidence or be explicitly marked unverified. Do not fabricate "
-            "citations or sources.\n\n"
+            "You write a rigorous, professional, executive-grade research intelligence report in GitHub Flavored Markdown.\n\n"
+            "FORMATTING GUIDELINES:\n"
+            "- Use clean Markdown headings (e.g. # Title, ## Section, ### Sub-section). Do NOT escape hash signs, asterisks, or brackets (never write \\# or \\*\\* or \\[).\n"
+            "- Never leak internal code identifiers such as 'ClaimVerdict.SUPPORTED'. Use human-readable words like 'Supported', 'Partially Supported', or 'Unverified'.\n"
+            "- Make all source citations clickable markdown links in the format: [Source Name / Domain](URL).\n"
+            "- Do not include raw HTML or SVG code.\n\n"
+            "REPORT STRUCTURE:\n"
+            "1. # Executive Summary: Concise overview answering the core research question directly.\n"
+            "2. ## Key Verified Findings: Detailed findings that are backed by explicit evidence, with inline clickable source links and brief factual quotes/excerpts.\n"
+            "3. ## Unverified or Speculative Claims: Claims that lack independent corroboration, clearly labeled so they are not mistaken for established facts.\n"
+            "4. ## Contradictions & Differing Perspectives: Any conflicting information, trade-offs, or disputes found in the evidence.\n"
+            "5. ## Evidence Ledger: A clean markdown table summarizing:\n"
+            "   | Claim | Verification Status | Source Link | Notes |\n"
+            "   |---|---|---|---|\n"
+            "6. ## Research Limitations & Methodology: Explicitly state the scope, search provider used (DuckDuckGo), unique source count, and verification depth.\n\n"
             f"Research question: {query}\n"
-            f"Findings summary: {findings_summary}\n"
-            f"Evidence summary: {evidence_summary}\n"
-            f"Contradictions: {contradictions}\n"
-            f"Limitations: {limitations}\n"
+            f"{sources_info}"
+            f"Findings summary:\n{findings_summary}\n\n"
+            f"Evidence summary:\n{evidence_summary}\n\n"
+            f"Contradictions:\n{contradictions}\n\n"
+            f"Limitations:\n{limitations}\n"
         )
         return self._run(prompt, FinalReport, "synthesize_report")
 
