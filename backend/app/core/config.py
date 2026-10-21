@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Ensure .env is loaded from the repository root regardless of current working directory
+_ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+load_dotenv(dotenv_path=_ROOT_ENV)
 
 
 class Settings:
