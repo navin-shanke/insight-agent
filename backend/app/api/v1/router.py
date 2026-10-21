@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, research, metrics, discoveries, reports, evidence, watchlists, schedules, integrations
+from app.api.v1 import auth, research, metrics, discoveries, reports, evidence, watchlists, schedules, integrations, instagram
 
 router = APIRouter(prefix="/api/v1")
 
@@ -17,3 +17,4 @@ router.include_router(evidence.router)
 router.include_router(watchlists.router)
 router.include_router(schedules.router)
 router.include_router(integrations.router)
+router.include_router(instagram.router)

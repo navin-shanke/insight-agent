@@ -12,6 +12,7 @@ import {
   Cable,
   Settings,
   Sparkles,
+  Brain,
 } from 'lucide-react';
 
 interface NavItem {
@@ -26,6 +27,7 @@ const workspaceNav: NavItem[] = [
   { name: 'Intelligence Feed', path: '/feed', icon: Radio },
   { name: 'Reports', path: '/reports', icon: FileText },
   { name: 'Evidence Explorer', path: '/evidence', icon: SearchCode },
+  { name: 'Instagram Intelligence', path: '/instagram', icon: Brain },
 ];
 
 const automationNav: NavItem[] = [

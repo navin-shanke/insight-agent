@@ -9,6 +9,7 @@ import { IntelligenceFeed } from './pages/IntelligenceFeed';
 import { Reports } from './pages/Reports';
 import { ReportDetail } from './pages/ReportDetail';
 import { EvidenceExplorer } from './pages/EvidenceExplorer';
+import { InstagramIntelligence } from './pages/InstagramIntelligence';
 import { Watchlists } from './pages/Watchlists';
 import { Schedules } from './pages/Schedules';
 import { Integrations } from './pages/Integrations';
@@ -64,6 +65,10 @@ export const router = createBrowserRouter([
       {
         path: 'evidence',
         element: <EvidenceExplorer />,
+      },
+      {
+        path: 'instagram',
+        element: <InstagramIntelligence />,
       },
       {
         path: 'tasks',

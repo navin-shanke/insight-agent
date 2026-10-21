@@ -67,6 +67,34 @@ export interface Discovery {
   sources: DiscoverySource[];
 }
 
+export interface ReportFinding {
+  id: string;
+  claim_text: string;
+  verification_status: string;
+  category?: string | null;
+  confidence_rationale?: string | null;
+  source_url?: string | null;
+  source_domain?: string | null;
+  evidence_excerpts: string[];
+}
+
+export interface ReportSource {
+  url: string;
+  domain: string;
+  title?: string | null;
+}
+
+export interface ReportMetrics {
+  unique_sources_count: number;
+  unique_domains_count: number;
+  total_discoveries_count: number;
+  total_claims_count: number;
+  supported_count: number;
+  partially_supported_count: number;
+  contradicted_count: number;
+  unverified_count: number;
+}
+
 export interface Report {
   id: string;
   title: string;
@@ -78,6 +106,10 @@ export interface Report {
   updated_at: string;
   discovery_ids: string[];
   body_md?: string;
+  executive_summary?: string | null;
+  metrics?: ReportMetrics;
+  findings?: ReportFinding[];
+  sources?: ReportSource[];
 }
 
 export interface Evidence {
@@ -138,4 +170,109 @@ export interface TelegramConfig {
   enabled: boolean;
   configured: boolean;
   chat_id_masked?: string | null;
+}
+
+export interface InstagramMetrics {
+  likes?: number | null;
+  views?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  saves?: number | null;
+}
+
+export interface InstagramObservation {
+  id: string;
+  source_url: string;
+  account_handle?: string | null;
+  content_id?: string | null;
+  format: 'reel' | 'carousel' | 'image' | 'unknown';
+  caption: string;
+  hook: string;
+  hook_type: string;
+  hook_length_chars: number;
+  hashtags: string[];
+  posted_at?: string | null;
+  observed_at: string;
+  collection_method: 'user_url' | 'manual_entry' | 'dataset_export' | 'graph_api';
+  provenance_notes?: string | null;
+  metrics?: InstagramMetrics | null;
+  notes?: string | null;
+}
+
+export interface PromisingPattern {
+  id: string;
+  pattern_title: string;
+  description: string;
+  format: string;
+  sample_size: number;
+  measured_outcome: string;
+  confidence: 'low' | 'medium' | 'high';
+  limitations: string;
+  last_updated: string;
+}
+
+export interface TestedHypothesis {
+  id: string;
+  hypothesis: string;
+  status: 'testing' | 'supported' | 'inconclusive' | 'refuted';
+  sample_size: number;
+  evidence_notes: string;
+  last_evaluated_at: string;
+}
+
+export interface UserFeedbackItem {
+  id: string;
+  target_id: string;
+  target_type: 'pattern' | 'experiment' | 'recommendation';
+  action: 'accepted' | 'rejected' | 'modified';
+  user_note?: string | null;
+  created_at: string;
+}
+
+export interface InstagramStrategyProfile {
+  version: number;
+  sample_size: number;
+  last_updated: string;
+  promising_patterns: PromisingPattern[];
+  tested_hypotheses: TestedHypothesis[];
+  user_feedback: UserFeedbackItem[];
+  learning_notes: string[];
+}
+
+export interface InstagramExperiment {
+  id: string;
+  title: string;
+  proposed_change: string;
+  evidence_rationale: string;
+  why_it_helps: string;
+  evaluation_metric: string;
+  sample_required: number;
+  status: 'proposed' | 'active' | 'completed' | 'rejected';
+  confidence: 'low' | 'medium' | 'high';
+  baseline_summary?: string | null;
+  outcome_summary?: string | null;
+  created_at: string;
+  completed_at?: string | null;
+}
+
+export interface FormatBreakdown {
+  format: string;
+  count: number;
+  percentage: number;
+  avg_likes?: number | null;
+  avg_views?: number | null;
+}
+
+export interface HookTypeBreakdown {
+  hook_type: string;
+  count: number;
+  sample_examples: string[];
+}
+
+export interface InstagramPatternsResponse {
+  total_observations: number;
+  formats: FormatBreakdown[];
+  hook_types: HookTypeBreakdown[];
+  top_hashtags: { tag: string; count: number }[];
+  disclaimer: string;
 }

@@ -1,0 +1,1131 @@
+import React, { useEffect, useState } from 'react';
+import {
+  Sparkles,
+  RefreshCw,
+  Plus,
+  Video,
+  Layers,
+  Image as ImageIcon,
+  FlaskConical,
+  CheckCircle2,
+  XCircle,
+  HelpCircle,
+  ExternalLink,
+  ChevronRight,
+  TrendingUp,
+  ShieldCheck,
+  AlertTriangle,
+  Calendar,
+  MessageSquare,
+  ThumbsUp,
+  Eye,
+  Hash,
+  Scale,
+  Brain,
+  History,
+} from 'lucide-react';
+import toast from 'react-hot-toast';
+import { SkeletonCard } from '../design-system/components/SkeletonCard';
+import { EmptyState } from '../design-system/components/EmptyState';
+import {
+  fetchInstagramObservations,
+  fetchInstagramPatterns,
+  fetchInstagramStrategy,
+  fetchInstagramExperiments,
+  ingestInstagramObservation,
+  submitInstagramFeedback,
+  createInstagramExperiment,
+  recordExperimentOutcome,
+} from '../api/instagram';
+import {
+  InstagramExperiment,
+  InstagramObservation,
+  InstagramPatternsResponse,
+  InstagramStrategyProfile,
+} from '../types';
+
+export const InstagramIntelligence: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'strategy' | 'experiments' | 'content' | 'patterns'>('strategy');
+
+  const [loading, setLoading] = useState(true);
+  const [strategy, setStrategy] = useState<InstagramStrategyProfile | null>(null);
+  const [patterns, setPatterns] = useState<InstagramPatternsResponse | null>(null);
+  const [experiments, setExperiments] = useState<InstagramExperiment[]>([]);
+  const [observations, setObservations] = useState<InstagramObservation[]>([]);
+
+  // Ingest Modal state
+  const [showIngestModal, setShowIngestModal] = useState(false);
+  const [ingestForm, setIngestForm] = useState({
+    source_url: '',
+    account_handle: '',
+    format: 'reel' as 'reel' | 'carousel' | 'image' | 'unknown',
+    caption: '',
+    hook: '',
+    views: '',
+    likes: '',
+    comments: '',
+    collection_method: 'user_url' as 'user_url' | 'manual_entry' | 'dataset_export',
+    provenance_notes: 'User-provided post observation',
+  });
+  const [ingesting, setIngesting] = useState(false);
+
+  // New Experiment Modal state
+  const [showExpModal, setShowExpModal] = useState(false);
+  const [expForm, setExpForm] = useState({
+    title: '',
+    proposed_change: '',
+    evidence_rationale: '',
+    why_it_helps: '',
+    evaluation_metric: 'View completion & comment rate',
+    sample_required: 3,
+    baseline_summary: '',
+  });
+
+  // Outcome Modal state
+  const [outcomeModal, setOutcomeModal] = useState<{ open: boolean; expId: string; title: string }>({
+    open: false,
+    expId: '',
+    title: '',
+  });
+  const [outcomeText, setOutcomeText] = useState('');
+
+  const loadAll = async () => {
+    try {
+      const [sRes, pRes, eRes, oRes] = await Promise.all([
+        fetchInstagramStrategy(),
+        fetchInstagramPatterns(),
+        fetchInstagramExperiments(),
+        fetchInstagramObservations(100),
+      ]);
+      setStrategy(sRes);
+      setPatterns(pRes);
+      setExperiments(eRes);
+      setObservations(oRes.items || []);
+    } catch (err) {
+      toast.error('Failed to load Instagram learning data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  const handleIngestSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ingestForm.source_url || !ingestForm.caption) {
+      toast.error('Please enter a source URL and caption');
+      return;
+    }
+
+    setIngesting(true);
+    try {
+      const metrics = {
+        views: ingestForm.views ? parseInt(ingestForm.views, 10) : null,
+        likes: ingestForm.likes ? parseInt(ingestForm.likes, 10) : null,
+        comments: ingestForm.comments ? parseInt(ingestForm.comments, 10) : null,
+      };
+
+      await ingestInstagramObservation({
+        source_url: ingestForm.source_url,
+        account_handle: ingestForm.account_handle ? (ingestForm.account_handle.startsWith('@') ? ingestForm.account_handle : `@${ingestForm.account_handle}`) : undefined,
+        format: ingestForm.format,
+        caption: ingestForm.caption,
+        hook: ingestForm.hook || undefined,
+        metrics,
+        collection_method: ingestForm.collection_method,
+        provenance_notes: ingestForm.provenance_notes || undefined,
+      });
+
+      toast.success('Observation ingested and patterns adapted');
+      setShowIngestModal(false);
+      setIngestForm({
+        source_url: '',
+        account_handle: '',
+        format: 'reel',
+        caption: '',
+        hook: '',
+        views: '',
+        likes: '',
+        comments: '',
+        collection_method: 'user_url',
+        provenance_notes: 'User-provided post observation',
+      });
+      await loadAll();
+    } catch (err) {
+      toast.error('Failed to ingest observation');
+    } finally {
+      setIngesting(false);
+    }
+  };
+
+  const handleCreateExperiment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!expForm.title || !expForm.proposed_change) {
+      toast.error('Please complete the title and proposed change');
+      return;
+    }
+    try {
+      await createInstagramExperiment(expForm);
+      toast.success('Experiment proposed');
+      setShowExpModal(false);
+      setExpForm({
+        title: '',
+        proposed_change: '',
+        evidence_rationale: '',
+        why_it_helps: '',
+        evaluation_metric: 'View completion & comment rate',
+        sample_required: 3,
+        baseline_summary: '',
+      });
+      await loadAll();
+    } catch (err) {
+      toast.error('Failed to propose experiment');
+    }
+  };
+
+  const handleFeedback = async (
+    targetId: string,
+    targetType: 'pattern' | 'experiment' | 'recommendation',
+    action: 'accepted' | 'rejected' | 'modified',
+    note?: string
+  ) => {
+    try {
+      await submitInstagramFeedback({
+        target_id: targetId,
+        target_type: targetType,
+        action,
+        user_note: note,
+      });
+      toast.success(`Strategy updated: ${action} ${targetType}`);
+      await loadAll();
+    } catch (err) {
+      toast.error('Failed to save feedback');
+    }
+  };
+
+  const handleRecordOutcomeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!outcomeText.trim()) return;
+    try {
+      await recordExperimentOutcome(outcomeModal.expId, outcomeText.trim(), 'completed');
+      toast.success('Experiment outcome recorded');
+      setOutcomeModal({ open: false, expId: '', title: '' });
+      setOutcomeText('');
+      await loadAll();
+    } catch (err) {
+      toast.error('Failed to record outcome');
+    }
+  };
+
+  if (loading) {
+    return <SkeletonCard rows={8} />;
+  }
+
+  return (
+    <div className="space-y-6 animate-fade-in pb-16">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-[#1E2535]">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Brain className="w-5 h-5 text-indigo-400" />
+            <h1 className="text-2xl font-bold tracking-tight text-slate-100">
+              Instagram Intelligence & Adaptive Learning
+            </h1>
+          </div>
+          <p className="text-xs text-slate-400">
+            Evidence-grounded pattern extraction, persistent strategy profiles, and controlled experiment evaluation.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowIngestModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-all"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Ingest Post Observation</span>
+          </button>
+          <button
+            onClick={loadAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#11151E] hover:bg-[#161B27] text-slate-300 border border-[#1E2535] transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
+            <span>Refresh</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Overview Stat Ribbon */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535]">
+          <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">
+            Observed Posts
+          </span>
+          <div className="text-2xl font-bold text-slate-100 font-mono">
+            {strategy?.sample_size || 0}
+          </div>
+          <p className="text-[10px] text-slate-500 mt-0.5">With full provenance & timestamp</p>
+        </div>
+
+        <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535]">
+          <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">
+            Promising Patterns
+          </span>
+          <div className="text-2xl font-bold text-emerald-400 font-mono">
+            {strategy?.promising_patterns.length || 0}
+          </div>
+          <p className="text-[10px] text-slate-500 mt-0.5">Verified across sample size</p>
+        </div>
+
+        <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535]">
+          <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">
+            Active Experiments
+          </span>
+          <div className="text-2xl font-bold text-indigo-400 font-mono">
+            {experiments.filter((e) => e.status === 'active' || e.status === 'proposed').length}
+          </div>
+          <p className="text-[10px] text-slate-500 mt-0.5">Controlled test proposals</p>
+        </div>
+
+        <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535]">
+          <span className="text-[11px] text-slate-400 uppercase font-semibold block mb-1">
+            User Feedback Adjustments
+          </span>
+          <div className="text-2xl font-bold text-amber-400 font-mono">
+            {strategy?.user_feedback.length || 0}
+          </div>
+          <p className="text-[10px] text-slate-500 mt-0.5">Accepted or rejected learnings</p>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-[#1E2535] text-xs">
+        <button
+          onClick={() => setActiveTab('strategy')}
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'strategy'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>Strategy Profile & Hypotheses</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('experiments')}
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'experiments'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <FlaskConical className="w-3.5 h-3.5" />
+          <span>Experiment Lab</span>
+          {experiments.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-[#161B27] text-[10px] text-slate-300 font-mono">
+              {experiments.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('content')}
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'content'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>Observed Content Ledger</span>
+          {observations.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-[#161B27] text-[10px] text-slate-300 font-mono">
+              {observations.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('patterns')}
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+            activeTab === 'patterns'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <TrendingUp className="w-3.5 h-3.5" />
+          <span>Pattern & Format Analysis</span>
+        </button>
+      </div>
+
+      {/* Tab 1: Strategy & Hypotheses */}
+      {activeTab === 'strategy' && (
+        <div className="space-y-6">
+          {/* Promising Patterns Section */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                  <span>Promising Content Patterns</span>
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Patterns backed by observed sample sizes and measured outcome trends.
+                </p>
+              </div>
+            </div>
+
+            {strategy && strategy.promising_patterns.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {strategy.promising_patterns.map((pat) => (
+                  <div
+                    key={pat.id}
+                    className="p-5 rounded-xl bg-[#11151E] border border-[#1E2535] hover:border-[#2A3449] transition-all space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            Confidence: {pat.confidence}
+                          </span>
+                          <span className="text-[11px] text-slate-400 font-mono">
+                            Sample: {pat.sample_size} posts
+                          </span>
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-100">{pat.pattern_title}</h3>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                      {pat.description}
+                    </p>
+
+                    <div className="p-2.5 rounded-lg bg-[#0E1118] border border-[#1E2535] text-xs space-y-1">
+                      <div className="flex items-center justify-between text-slate-400 text-[11px]">
+                        <span>Measured Outcome:</span>
+                        <span className="font-semibold text-slate-200">{pat.measured_outcome}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500">
+                        <span className="font-semibold">Caveat:</span> {pat.limitations}
+                      </div>
+                    </div>
+
+                    {/* User Feedback Actions */}
+                    <div className="flex items-center justify-end gap-2 pt-1 border-t border-[#1E2535]/60 text-xs">
+                      <span className="text-[10px] text-slate-500 mr-auto">User alignment:</span>
+                      <button
+                        onClick={() => handleFeedback(pat.id, 'pattern', 'accepted')}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#161B27] hover:bg-emerald-500/10 hover:text-emerald-400 text-slate-300 border border-[#1E2535] transition-colors text-[11px]"
+                      >
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        <span>Accept</span>
+                      </button>
+                      <button
+                        onClick={() => handleFeedback(pat.id, 'pattern', 'rejected')}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#161B27] hover:bg-rose-500/10 hover:text-rose-400 text-slate-300 border border-[#1E2535] transition-colors text-[11px]"
+                      >
+                        <XCircle className="w-3 h-3 text-rose-400" />
+                        <span>Reject</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-8 text-center rounded-xl bg-[#11151E] border border-[#1E2535] text-slate-400 text-xs">
+                No promising patterns identified yet. Ingest 2 or more posts to establish initial patterns.
+              </div>
+            )}
+          </div>
+
+          {/* Tested Hypotheses */}
+          <div className="space-y-3 pt-2">
+            <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Scale className="w-4 h-4 text-indigo-400" />
+              <span>Tested Hypotheses & Evidence</span>
+            </h2>
+
+            {strategy && strategy.tested_hypotheses.length > 0 ? (
+              <div className="divide-y divide-[#1E2535] rounded-xl border border-[#1E2535] bg-[#11151E] overflow-hidden">
+                {strategy.tested_hypotheses.map((hyp) => {
+                  let statusBadge = 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+                  if (hyp.status === 'supported') {
+                    statusBadge = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+                  } else if (hyp.status === 'testing') {
+                    statusBadge = 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20';
+                  } else if (hyp.status === 'refuted') {
+                    statusBadge = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+                  }
+
+                  return (
+                    <div key={hyp.id} className="p-4 sm:p-5 space-y-2 hover:bg-[#161B27]/40 transition-colors">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className={`px-2.5 py-0.5 rounded text-[10px] font-semibold uppercase border ${statusBadge}`}>
+                          {hyp.status}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-500">
+                          Sample: {hyp.sample_size} posts
+                        </span>
+                      </div>
+
+                      <p className="text-sm font-semibold text-slate-200">
+                        {hyp.hypothesis}
+                      </p>
+
+                      <p className="text-xs text-slate-400 bg-[#0E1118] p-2 rounded-lg border border-[#1E2535]">
+                        <span className="font-semibold text-slate-500 text-[10px] uppercase block mb-0.5">
+                          Evidence Notes
+                        </span>
+                        {hyp.evidence_notes}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+
+          {/* User Feedback History */}
+          {strategy && strategy.user_feedback.length > 0 && (
+            <div className="space-y-3 pt-2">
+              <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <History className="w-4 h-4 text-slate-400" />
+                <span>User Correction & Alignment Log</span>
+              </h2>
+
+              <div className="divide-y divide-[#1E2535] rounded-xl border border-[#1E2535] bg-[#11151E] overflow-hidden text-xs">
+                {strategy.user_feedback.map((fb) => (
+                  <div key={fb.id} className="p-3.5 flex items-center justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                            fb.action === 'accepted'
+                              ? 'bg-emerald-500/10 text-emerald-400'
+                              : fb.action === 'rejected'
+                              ? 'bg-rose-500/10 text-rose-400'
+                              : 'bg-amber-500/10 text-amber-400'
+                          }`}
+                        >
+                          {fb.action}
+                        </span>
+                        <span className="text-slate-300 font-mono text-[11px]">
+                          Target: {fb.target_id} ({fb.target_type})
+                        </span>
+                      </div>
+                      {fb.user_note && <p className="text-slate-400 text-[11px]">{fb.user_note}</p>}
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {new Date(fb.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 2: Experiment Lab */}
+      {activeTab === 'experiments' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <FlaskConical className="w-4 h-4 text-indigo-400" />
+                <span>Explainable Experiment Proposals</span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                Controlled tests to evaluate content strategies against measurable baselines.
+              </p>
+            </div>
+
+            <button
+              onClick={() => setShowExpModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#11151E] hover:bg-[#161B27] text-slate-300 border border-[#1E2535]"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Propose New Experiment</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {experiments.map((exp) => (
+              <div
+                key={exp.id}
+                className="p-5 rounded-xl bg-[#11151E] border border-[#1E2535] hover:border-[#2A3449] transition-all space-y-4 flex flex-col justify-between"
+              >
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                        exp.status === 'completed'
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : exp.status === 'active'
+                          ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                          : exp.status === 'rejected'
+                          ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                          : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                      }`}
+                    >
+                      {exp.status}
+                    </span>
+
+                    <span className="text-[11px] font-mono text-slate-400">
+                      Sample Target: {exp.sample_required} posts
+                    </span>
+                  </div>
+
+                  <h3 className="text-sm font-bold text-slate-100 leading-snug">{exp.title}</h3>
+
+                  <div className="space-y-2 text-xs">
+                    <div className="p-2.5 rounded-lg bg-[#0E1118] border border-[#1E2535] space-y-1">
+                      <span className="text-[10px] text-slate-500 uppercase font-semibold block">
+                        Proposed Change
+                      </span>
+                      <p className="text-slate-200">{exp.proposed_change}</p>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-[#0E1118] border border-[#1E2535] space-y-1">
+                      <span className="text-[10px] text-slate-500 uppercase font-semibold block">
+                        Evidence Rationale & Mechanism
+                      </span>
+                      <p className="text-slate-300">{exp.evidence_rationale}</p>
+                      <p className="text-indigo-400 font-sans text-[11px] pt-1">
+                        Why it may help: {exp.why_it_helps}
+                      </p>
+                    </div>
+
+                    <div className="p-2 rounded bg-[#0E1118] text-[11px] flex items-center justify-between text-slate-400 border border-[#1E2535]">
+                      <span>Evaluation Metric:</span>
+                      <span className="text-slate-200 font-semibold">{exp.evaluation_metric}</span>
+                    </div>
+
+                    {exp.baseline_summary && (
+                      <div className="text-[11px] text-slate-400">
+                        <span className="text-slate-500 font-semibold">Baseline:</span> {exp.baseline_summary}
+                      </div>
+                    )}
+
+                    {exp.outcome_summary && (
+                      <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300">
+                        <span className="font-semibold block text-[10px] uppercase mb-0.5">
+                          Measured Outcome
+                        </span>
+                        {exp.outcome_summary}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#1E2535] text-xs">
+                  {exp.status === 'proposed' && (
+                    <>
+                      <button
+                        onClick={() => handleFeedback(exp.id, 'experiment', 'accepted')}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-[11px]"
+                      >
+                        Accept & Activate
+                      </button>
+                      <button
+                        onClick={() => handleFeedback(exp.id, 'experiment', 'rejected')}
+                        className="px-3 py-1.5 rounded-lg bg-[#161B27] hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-[#1E2535] font-medium text-[11px]"
+                      >
+                        Reject
+                      </button>
+                    </>
+                  )}
+
+                  {exp.status === 'active' && (
+                    <button
+                      onClick={() => setOutcomeModal({ open: true, expId: exp.id, title: exp.title })}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-[11px]"
+                    >
+                      Record Measured Outcome
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab 3: Observed Content Ledger */}
+      {activeTab === 'content' && (
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <span className="font-semibold text-slate-200 block">Observed Instagram Posts & Provenance</span>
+              <span className="text-slate-400 text-[11px]">
+                {observations.length} items collected via permitted user URLs and exports. Missing metrics remain null.
+              </span>
+            </div>
+
+            <button
+              onClick={() => setShowIngestModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold self-start sm:self-auto"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Ingest New Post</span>
+            </button>
+          </div>
+
+          {observations.length > 0 ? (
+            <div className="divide-y divide-[#1E2535] rounded-xl border border-[#1E2535] bg-[#11151E] overflow-hidden">
+              {observations.map((obs) => (
+                <div key={obs.id} className="p-4 sm:p-5 space-y-3 hover:bg-[#161B27]/40 transition-colors">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                          {obs.format}
+                        </span>
+
+                        {obs.account_handle && (
+                          <span className="text-xs font-semibold text-slate-200">
+                            {obs.account_handle}
+                          </span>
+                        )}
+
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          Method: {obs.collection_method}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-slate-300 font-medium">
+                        <span className="text-slate-500 uppercase text-[10px] font-semibold mr-1">Hook:</span>
+                        &ldquo;{obs.hook}&rdquo;
+                      </div>
+                    </div>
+
+                    <a
+                      href={obs.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded bg-[#161B27] border border-[#1E2535] flex-shrink-0"
+                    >
+                      <span>Link</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+
+                  <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                    {obs.caption}
+                  </p>
+
+                  {/* Metrics bar */}
+                  <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-400 pt-1 border-t border-[#1E2535]/60 font-mono">
+                    <span className="flex items-center gap-1">
+                      <Eye className="w-3 h-3 text-slate-500" />
+                      <span>{obs.metrics?.views !== null && obs.metrics?.views !== undefined ? obs.metrics.views.toLocaleString() : '— Not reported'}</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <ThumbsUp className="w-3 h-3 text-slate-500" />
+                      <span>{obs.metrics?.likes !== null && obs.metrics?.likes !== undefined ? obs.metrics.likes.toLocaleString() : '— Not reported'}</span>
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <MessageSquare className="w-3 h-3 text-slate-500" />
+                      <span>{obs.metrics?.comments !== null && obs.metrics?.comments !== undefined ? obs.metrics.comments.toLocaleString() : '— Not reported'}</span>
+                    </span>
+                    <span className="ml-auto text-[10px] text-slate-500">
+                      Observed: {new Date(obs.observed_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-8 text-center rounded-xl bg-[#11151E] border border-[#1E2535] text-slate-400 text-xs space-y-2">
+              <p>No Instagram posts observed yet.</p>
+              <p className="text-[11px] text-slate-500">
+                Click &ldquo;Ingest Post Observation&rdquo; to add a URL or user-provided dataset.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 4: Pattern & Format Analysis */}
+      {activeTab === 'patterns' && (
+        <div className="space-y-6">
+          {patterns?.disclaimer && (
+            <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] text-xs text-slate-400 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+              <p>{patterns.disclaimer}</p>
+            </div>
+          )}
+
+          {/* Formats Grid */}
+          <div className="space-y-3">
+            <h2 className="text-base font-bold text-slate-100">Content Format Distribution</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {patterns?.formats.map((fmt) => (
+                <div key={fmt.format} className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-400 uppercase font-semibold">
+                    <span className="capitalize">{fmt.format}</span>
+                    <span className="font-mono text-indigo-400">{fmt.percentage}%</span>
+                  </div>
+                  <div className="text-2xl font-bold text-slate-100 font-mono">
+                    {fmt.count}
+                  </div>
+                  <div className="text-[10px] text-slate-500 space-y-0.5 pt-1 border-t border-[#1E2535]">
+                    <div>Avg Views: {fmt.avg_views !== null && fmt.avg_views !== undefined ? fmt.avg_views.toLocaleString() : 'N/A (unreported)'}</div>
+                    <div>Avg Likes: {fmt.avg_likes !== null && fmt.avg_likes !== undefined ? fmt.avg_likes.toLocaleString() : 'N/A (unreported)'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Hook Styles */}
+          <div className="space-y-3 pt-2">
+            <h2 className="text-base font-bold text-slate-100">Opening Hook Styles</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {patterns?.hook_types.map((ht) => (
+                <div key={ht.hook_type} className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-2">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="capitalize text-slate-200">{ht.hook_type.replace('_', ' ')}</span>
+                    <span className="font-mono text-indigo-400">{ht.count} posts</span>
+                  </div>
+                  {ht.sample_examples.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      {ht.sample_examples.map((ex, i) => (
+                        <p key={i} className="text-[11px] text-slate-400 italic truncate bg-[#0E1118] p-1.5 rounded">
+                          &ldquo;{ex}&rdquo;
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Hashtags */}
+          {patterns?.top_hashtags && patterns.top_hashtags.length > 0 && (
+            <div className="space-y-3 pt-2">
+              <h2 className="text-base font-bold text-slate-100">Top Observed Hashtags</h2>
+              <div className="flex flex-wrap gap-2">
+                {patterns.top_hashtags.map((h) => (
+                  <span
+                    key={h.tag}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#11151E] border border-[#1E2535] text-xs font-mono text-slate-300"
+                  >
+                    <Hash className="w-3 h-3 text-indigo-400" />
+                    <span>#{h.tag}</span>
+                    <span className="text-[10px] text-slate-500 font-semibold">({h.count})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal: Ingest Post Observation */}
+      {showIngestModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#11151E] border border-[#1E2535] rounded-xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-[#1E2535] pb-3">
+              <h3 className="text-base font-bold text-slate-100">Ingest Instagram Observation</h3>
+              <button
+                onClick={() => setShowIngestModal(false)}
+                className="text-slate-400 hover:text-slate-200 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleIngestSubmit} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium block">Source URL *</label>
+                <input
+                  type="url"
+                  required
+                  placeholder="https://www.instagram.com/reel/..."
+                  value={ingestForm.source_url}
+                  onChange={(e) => setIngestForm({ ...ingestForm, source_url: e.target.value })}
+                  className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs font-mono focus:border-indigo-500 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-medium block">Creator Handle</label>
+                  <input
+                    type="text"
+                    placeholder="@creator"
+                    value={ingestForm.account_handle}
+                    onChange={(e) => setIngestForm({ ...ingestForm, account_handle: e.target.value })}
+                    className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs font-mono focus:border-indigo-500 outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-medium block">Format</label>
+                  <select
+                    value={ingestForm.format}
+                    onChange={(e: any) => setIngestForm({ ...ingestForm, format: e.target.value })}
+                    className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs focus:border-indigo-500 outline-none"
+                  >
+                    <option value="reel">Reel (Short Video)</option>
+                    <option value="carousel">Carousel (Multi-slide)</option>
+                    <option value="image">Single Image</option>
+                    <option value="unknown">Other / Unknown</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium block">Caption Text *</label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Paste the post caption..."
+                  value={ingestForm.caption}
+                  onChange={(e) => setIngestForm({ ...ingestForm, caption: e.target.value })}
+                  className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs focus:border-indigo-500 outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium block">
+                  Opening Hook <span className="text-slate-500 font-normal">(Optional, auto-extracted if blank)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="The first line or opening prompt..."
+                  value={ingestForm.hook}
+                  onChange={(e) => setIngestForm({ ...ingestForm, hook: e.target.value })}
+                  className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs focus:border-indigo-500 outline-none"
+                />
+              </div>
+
+              {/* Observed Metrics (Optional) */}
+              <div className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535] space-y-2">
+                <span className="text-[11px] font-semibold text-slate-300 block">
+                  Observed Metrics (Leave blank if unavailable — never guessed)
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  <input
+                    type="number"
+                    placeholder="Views"
+                    value={ingestForm.views}
+                    onChange={(e) => setIngestForm({ ...ingestForm, views: e.target.value })}
+                    className="bg-[#161B27] border border-[#1E2535] rounded p-2 text-slate-200 text-xs font-mono outline-none"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Likes"
+                    value={ingestForm.likes}
+                    onChange={(e) => setIngestForm({ ...ingestForm, likes: e.target.value })}
+                    className="bg-[#161B27] border border-[#1E2535] rounded p-2 text-slate-200 text-xs font-mono outline-none"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Comments"
+                    value={ingestForm.comments}
+                    onChange={(e) => setIngestForm({ ...ingestForm, comments: e.target.value })}
+                    className="bg-[#161B27] border border-[#1E2535] rounded p-2 text-slate-200 text-xs font-mono outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-medium block">Collection Method</label>
+                  <select
+                    value={ingestForm.collection_method}
+                    onChange={(e: any) => setIngestForm({ ...ingestForm, collection_method: e.target.value })}
+                    className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs focus:border-indigo-500 outline-none"
+                  >
+                    <option value="user_url">User-Provided URL</option>
+                    <option value="manual_entry">Manual Observation</option>
+                    <option value="dataset_export">Dataset / CSV Export</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-medium block">Provenance Notes</label>
+                  <input
+                    type="text"
+                    value={ingestForm.provenance_notes}
+                    onChange={(e) => setIngestForm({ ...ingestForm, provenance_notes: e.target.value })}
+                    className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs focus:border-indigo-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#1E2535]">
+                <button
+                  type="button"
+                  onClick={() => setShowIngestModal(false)}
+                  className="px-4 py-2 rounded-lg bg-[#161B27] text-slate-300 hover:text-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={ingesting}
+                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold"
+                >
+                  {ingesting ? 'Saving...' : 'Save Observation'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Propose New Experiment */}
+      {showExpModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#11151E] border border-[#1E2535] rounded-xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-[#1E2535] pb-3">
+              <h3 className="text-base font-bold text-slate-100">Propose Controlled Experiment</h3>
+              <button
+                onClick={() => setShowExpModal(false)}
+                className="text-slate-400 hover:text-slate-200 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateExperiment} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium block">Experiment Title *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. 3-Second Question Hook vs Statement Hook"
+                  value={expForm.title}
+                  onChange={(e) => setExpForm({ ...expForm, title: e.target.value })}
+                  className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium block">Proposed Change *</label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="The concrete change to test..."
+                  value={expForm.proposed_change}
+                  onChange={(e) => setExpForm({ ...expForm, proposed_change: e.target.value })}
+                  className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium block">Evidence Rationale & Mechanism</label>
+                <textarea
+                  rows={2}
+                  placeholder="What evidence suggests this will help..."
+                  value={expForm.evidence_rationale}
+                  onChange={(e) => setExpForm({ ...expForm, evidence_rationale: e.target.value })}
+                  className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-medium block">Evaluation Metric</label>
+                  <input
+                    type="text"
+                    value={expForm.evaluation_metric}
+                    onChange={(e) => setExpForm({ ...expForm, evaluation_metric: e.target.value })}
+                    className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-slate-300 font-medium block">Sample Target</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={expForm.sample_required}
+                    onChange={(e) => setExpForm({ ...expForm, sample_required: parseInt(e.target.value, 10) || 3 })}
+                    className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#1E2535]">
+                <button
+                  type="button"
+                  onClick={() => setShowExpModal(false)}
+                  className="px-4 py-2 rounded-lg bg-[#161B27] text-slate-300 hover:text-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold"
+                >
+                  Propose Experiment
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Record Experiment Outcome */}
+      {outcomeModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#11151E] border border-[#1E2535] rounded-xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-fade-in">
+            <div className="flex items-center justify-between border-b border-[#1E2535] pb-3">
+              <h3 className="text-base font-bold text-slate-100">Record Experiment Outcome</h3>
+              <button
+                onClick={() => setOutcomeModal({ open: false, expId: '', title: '' })}
+                className="text-slate-400 hover:text-slate-200 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300">
+              Experiment: <span className="font-semibold text-slate-100">{outcomeModal.title}</span>
+            </p>
+
+            <form onSubmit={handleRecordOutcomeSubmit} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-slate-300 font-medium block">Measured Outcome Summary *</label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Record actual measured metrics across test posts against baseline..."
+                  value={outcomeText}
+                  onChange={(e) => setOutcomeText(e.target.value)}
+                  className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-2.5 text-slate-200 text-xs outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setOutcomeModal({ open: false, expId: '', title: '' })}
+                  className="px-4 py-2 rounded-lg bg-[#161B27] text-slate-300 hover:text-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold"
+                >
+                  Save Outcome
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
