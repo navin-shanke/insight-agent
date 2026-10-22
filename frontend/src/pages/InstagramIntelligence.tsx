@@ -32,7 +32,18 @@ import {
   FileSpreadsheet,
   FileText,
   Copy,
+  Search,
+  Filter,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  Cell,
+} from 'recharts';
 import toast from 'react-hot-toast';
 import { SkeletonCard } from '../design-system/components/SkeletonCard';
 import { EmptyState } from '../design-system/components/EmptyState';
@@ -120,6 +131,10 @@ export const InstagramIntelligence: React.FC = () => {
     title: '',
   });
   const [outcomeText, setOutcomeText] = useState('');
+
+  // Observed Content Ledger filters
+  const [contentFormatFilter, setContentFormatFilter] = useState<'ALL' | 'reel' | 'carousel' | 'image'>('ALL');
+  const [contentSearchQuery, setContentSearchQuery] = useState('');
 
   const loadAll = async () => {
     try {
@@ -597,7 +612,26 @@ export const InstagramIntelligence: React.FC = () => {
                         <h3 className="text-base font-semibold text-slate-100">{rec.title}</h3>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setExpForm({
+                              title: `Test: ${rec.title}`,
+                              proposed_change: rec.what_to_do,
+                              evidence_rationale: rec.supporting_evidence,
+                              why_it_helps: rec.why_recommended,
+                              evaluation_metric: rec.measurement_plan || 'Save and comment rate',
+                              sample_required: Math.max(3, rec.evidence_sample_size || 3),
+                              baseline_summary: `Current benchmark across N=${rec.evidence_sample_size} observed posts`,
+                            });
+                            setShowExpModal(true);
+                          }}
+                          className="flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-lg bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/20 transition-colors"
+                          title="Propose a controlled experiment testing this recommendation"
+                        >
+                          <FlaskConical className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Create Experiment</span>
+                        </button>
                         <button
                           onClick={() => handleRecommendationAction(rec.id, 'accepted')}
                           className="flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors"
@@ -1022,185 +1056,345 @@ export const InstagramIntelligence: React.FC = () => {
       )}
 
       {/* Tab 3: Observed Content Ledger */}
-      {activeTab === 'content' && (
-        <div className="space-y-4">
-          <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <div>
-              <span className="font-semibold text-slate-200 block">Observed Instagram Posts & Provenance</span>
-              <span className="text-slate-400 text-[11px]">
-                {observations.length} items collected via permitted user URLs and exports. Missing metrics remain null.
-              </span>
+      {activeTab === 'content' && (() => {
+        const totalObs = observations.length;
+        const withLikes = observations.filter((o) => o.metrics?.likes !== null && o.metrics?.likes !== undefined).length;
+        const withViews = observations.filter((o) => o.metrics?.views !== null && o.metrics?.views !== undefined).length;
+        const withComments = observations.filter((o) => o.metrics?.comments !== null && o.metrics?.comments !== undefined).length;
+
+        const filteredObs = observations.filter((obs) => {
+          if (contentFormatFilter !== 'ALL' && obs.format !== contentFormatFilter) return false;
+          if (contentSearchQuery.trim()) {
+            const q = contentSearchQuery.toLowerCase();
+            const inCaption = (obs.caption || '').toLowerCase().includes(q);
+            const inHook = (obs.hook || '').toLowerCase().includes(q);
+            const inHandle = (obs.account_handle || '').toLowerCase().includes(q);
+            const inTags = (obs.hashtags || []).some((t) => t.toLowerCase().includes(q));
+            if (!inCaption && !inHook && !inHandle && !inTags) return false;
+          }
+          return true;
+        });
+
+        return (
+          <div className="space-y-4">
+            {/* Action Bar */}
+            <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div>
+                <span className="font-semibold text-slate-200 block">Observed Instagram Posts & Provenance</span>
+                <span className="text-slate-400 text-[11px]">
+                  {observations.length} items collected via permitted user URLs and exports. Missing metrics strictly remain null.
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <button
+                  onClick={() => setShowBatchModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#161B27] hover:bg-[#1E2535] text-slate-200 border border-[#1E2535] text-xs font-medium transition-colors"
+                >
+                  <Upload className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Import CSV / JSON</span>
+                </button>
+                <button
+                  onClick={() => setShowIngestModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Ingest Single Post</span>
+                </button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              <button
-                onClick={() => setShowBatchModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#161B27] hover:bg-[#1E2535] text-slate-200 border border-[#1E2535] text-xs font-medium transition-colors"
-              >
-                <Upload className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Import CSV / JSON</span>
-              </button>
-              <button
-                onClick={() => setShowIngestModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Ingest Single Post</span>
-              </button>
+            {/* Metric Data Coverage Ribbon */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-[#0E1118] border border-[#1E2535] text-xs">
+                <span className="text-[10px] text-slate-500 uppercase font-semibold block">Total Observed</span>
+                <span className="text-lg font-bold text-slate-200 font-mono">{totalObs} posts</span>
+              </div>
+              <div className="p-3 rounded-xl bg-[#0E1118] border border-[#1E2535] text-xs">
+                <span className="text-[10px] text-slate-500 uppercase font-semibold block">Likes Recorded</span>
+                <span className="text-lg font-bold text-emerald-400 font-mono">
+                  {withLikes} <span className="text-xs font-normal text-slate-400">({totalObs ? Math.round((withLikes / totalObs) * 100) : 0}%)</span>
+                </span>
+              </div>
+              <div className="p-3 rounded-xl bg-[#0E1118] border border-[#1E2535] text-xs">
+                <span className="text-[10px] text-slate-500 uppercase font-semibold block">Views Recorded</span>
+                <span className="text-lg font-bold text-indigo-400 font-mono">
+                  {withViews} <span className="text-xs font-normal text-slate-400">({totalObs ? Math.round((withViews / totalObs) * 100) : 0}%)</span>
+                </span>
+              </div>
+              <div className="p-3 rounded-xl bg-[#0E1118] border border-[#1E2535] text-xs">
+                <span className="text-[10px] text-slate-500 uppercase font-semibold block">Comments Recorded</span>
+                <span className="text-lg font-bold text-amber-400 font-mono">
+                  {withComments} <span className="text-xs font-normal text-slate-400">({totalObs ? Math.round((withComments / totalObs) * 100) : 0}%)</span>
+                </span>
+              </div>
             </div>
-          </div>
 
-          {observations.length > 0 ? (
-            <div className="divide-y divide-[#1E2535] rounded-xl border border-[#1E2535] bg-[#11151E] overflow-hidden">
-              {observations.map((obs) => (
-                <div key={obs.id} className="p-4 sm:p-5 space-y-3 hover:bg-[#161B27]/40 transition-colors">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                          {obs.format}
-                        </span>
+            {/* Filter Bar */}
+            <div className="p-3.5 rounded-xl bg-[#11151E] border border-[#1E2535] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-slate-500 text-[10px] uppercase font-semibold mr-1">Format:</span>
+                {(['ALL', 'reel', 'carousel', 'image'] as const).map((fmt) => (
+                  <button
+                    key={fmt}
+                    onClick={() => setContentFormatFilter(fmt)}
+                    className={`px-2.5 py-1 rounded-lg font-medium capitalize text-xs transition-colors ${
+                      contentFormatFilter === fmt
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-[#0E1118] text-slate-400 hover:text-slate-200 border border-[#1E2535]'
+                    }`}
+                  >
+                    {fmt}
+                  </button>
+                ))}
+              </div>
 
-                        {obs.account_handle && (
-                          <span className="text-xs font-semibold text-slate-200">
-                            {obs.account_handle}
+              <div className="relative max-w-xs w-full">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={contentSearchQuery}
+                  onChange={(e) => setContentSearchQuery(e.target.value)}
+                  placeholder="Search caption, hook, or handle..."
+                  className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            {filteredObs.length > 0 ? (
+              <div className="divide-y divide-[#1E2535] rounded-xl border border-[#1E2535] bg-[#11151E] overflow-hidden">
+                {filteredObs.map((obs) => (
+                  <div key={obs.id} className="p-4 sm:p-5 space-y-3 hover:bg-[#161B27]/40 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                            {obs.format}
                           </span>
-                        )}
 
-                        <span className="text-[11px] text-slate-500 font-mono">
-                          Method: {obs.collection_method}
-                        </span>
+                          {obs.account_handle && (
+                            <span className="text-xs font-semibold text-slate-200">
+                              {obs.account_handle}
+                            </span>
+                          )}
+
+                          <span className="text-[11px] text-slate-500 font-mono">
+                            Method: {obs.collection_method}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-slate-300 font-medium">
+                          <span className="text-slate-500 uppercase text-[10px] font-semibold mr-1">Hook:</span>
+                          &ldquo;{obs.hook}&rdquo;
+                        </div>
                       </div>
 
-                      <div className="text-xs text-slate-300 font-medium">
-                        <span className="text-slate-500 uppercase text-[10px] font-semibold mr-1">Hook:</span>
-                        &ldquo;{obs.hook}&rdquo;
-                      </div>
+                      <a
+                        href={obs.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded bg-[#161B27] border border-[#1E2535] flex-shrink-0"
+                      >
+                        <span>Link</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
                     </div>
 
-                    <a
-                      href={obs.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-[11px] font-medium text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded bg-[#161B27] border border-[#1E2535] flex-shrink-0"
-                    >
-                      <span>Link</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
+                    <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                      {obs.caption}
+                    </p>
 
-                  <p className="text-xs text-slate-400 line-clamp-2 leading-relaxed">
-                    {obs.caption}
-                  </p>
-
-                  {/* Metrics bar */}
-                  <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-400 pt-1 border-t border-[#1E2535]/60 font-mono">
-                    <span className="flex items-center gap-1">
-                      <Eye className="w-3 h-3 text-slate-500" />
-                      <span>{obs.metrics?.views !== null && obs.metrics?.views !== undefined ? obs.metrics.views.toLocaleString() : '— Not reported'}</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <ThumbsUp className="w-3 h-3 text-slate-500" />
-                      <span>{obs.metrics?.likes !== null && obs.metrics?.likes !== undefined ? obs.metrics.likes.toLocaleString() : '— Not reported'}</span>
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <MessageSquare className="w-3 h-3 text-slate-500" />
-                      <span>{obs.metrics?.comments !== null && obs.metrics?.comments !== undefined ? obs.metrics.comments.toLocaleString() : '— Not reported'}</span>
-                    </span>
-                    <span className="ml-auto text-[10px] text-slate-500">
-                      Observed: {new Date(obs.observed_at).toLocaleDateString()}
-                    </span>
+                    {/* Metrics bar */}
+                    <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-400 pt-1 border-t border-[#1E2535]/60 font-mono">
+                      <span className="flex items-center gap-1">
+                        <Eye className="w-3 h-3 text-slate-500" />
+                        <span>{obs.metrics?.views !== null && obs.metrics?.views !== undefined ? obs.metrics.views.toLocaleString() : '— Not reported'}</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <ThumbsUp className="w-3 h-3 text-slate-500" />
+                        <span>{obs.metrics?.likes !== null && obs.metrics?.likes !== undefined ? obs.metrics.likes.toLocaleString() : '— Not reported'}</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3 text-slate-500" />
+                        <span>{obs.metrics?.comments !== null && obs.metrics?.comments !== undefined ? obs.metrics.comments.toLocaleString() : '— Not reported'}</span>
+                      </span>
+                      <span className="ml-auto text-[10px] text-slate-500">
+                        Observed: {new Date(obs.observed_at).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-8 text-center rounded-xl bg-[#11151E] border border-[#1E2535] text-slate-400 text-xs space-y-2">
-              <p>No Instagram posts observed yet.</p>
-              <p className="text-[11px] text-slate-500">
-                Click &ldquo;Ingest Post Observation&rdquo; to add a URL or user-provided dataset.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            ) : (
+              <div className="p-8 text-center rounded-xl bg-[#11151E] border border-[#1E2535] text-slate-400 text-xs space-y-2">
+                <p>No Instagram posts match the current filter criteria.</p>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Tab 4: Pattern & Format Analysis */}
-      {activeTab === 'patterns' && (
-        <div className="space-y-6">
-          {patterns?.disclaimer && (
-            <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] text-xs text-slate-400 flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-              <p>{patterns.disclaimer}</p>
-            </div>
-          )}
+      {activeTab === 'patterns' && (() => {
+        const formatChartData = (patterns?.formats || []).map((f) => ({
+          format: f.format.toUpperCase(),
+          count: f.count,
+          avgLikes: f.avg_likes || 0,
+        }));
 
-          {/* Formats Grid */}
-          <div className="space-y-3">
-            <h2 className="text-base font-bold text-slate-100">Content Format Distribution</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {patterns?.formats.map((fmt) => (
-                <div key={fmt.format} className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-2">
-                  <div className="flex items-center justify-between text-xs text-slate-400 uppercase font-semibold">
-                    <span className="capitalize">{fmt.format}</span>
-                    <span className="font-mono text-indigo-400">{fmt.percentage}%</span>
-                  </div>
-                  <div className="text-2xl font-bold text-slate-100 font-mono">
-                    {fmt.count}
-                  </div>
-                  <div className="text-[10px] text-slate-500 space-y-0.5 pt-1 border-t border-[#1E2535]">
-                    <div>Avg Views: {fmt.avg_views !== null && fmt.avg_views !== undefined ? fmt.avg_views.toLocaleString() : 'N/A (unreported)'}</div>
-                    <div>Avg Likes: {fmt.avg_likes !== null && fmt.avg_likes !== undefined ? fmt.avg_likes.toLocaleString() : 'N/A (unreported)'}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+        const hookChartData = (patterns?.hook_types || []).map((h) => ({
+          name: h.hook_type.replace('_', ' '),
+          count: h.count,
+        }));
 
-          {/* Hook Styles */}
-          <div className="space-y-3 pt-2">
-            <h2 className="text-base font-bold text-slate-100">Opening Hook Styles</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {patterns?.hook_types.map((ht) => (
-                <div key={ht.hook_type} className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-2">
-                  <div className="flex items-center justify-between text-xs font-semibold">
-                    <span className="capitalize text-slate-200">{ht.hook_type.replace('_', ' ')}</span>
-                    <span className="font-mono text-indigo-400">{ht.count} posts</span>
-                  </div>
-                  {ht.sample_examples.length > 0 && (
-                    <div className="space-y-1 pt-1">
-                      {ht.sample_examples.map((ex, i) => (
-                        <p key={i} className="text-[11px] text-slate-400 italic truncate bg-[#0E1118] p-1.5 rounded">
-                          &ldquo;{ex}&rdquo;
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+        const hashtagChartData = (patterns?.top_hashtags || []).slice(0, 8).map((h) => ({
+          tag: `#${h.tag}`,
+          count: h.count,
+        }));
 
-          {/* Hashtags */}
-          {patterns?.top_hashtags && patterns.top_hashtags.length > 0 && (
-            <div className="space-y-3 pt-2">
-              <h2 className="text-base font-bold text-slate-100">Top Observed Hashtags</h2>
-              <div className="flex flex-wrap gap-2">
-                {patterns.top_hashtags.map((h) => (
-                  <span
-                    key={h.tag}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#11151E] border border-[#1E2535] text-xs font-mono text-slate-300"
-                  >
-                    <Hash className="w-3 h-3 text-indigo-400" />
-                    <span>#{h.tag}</span>
-                    <span className="text-[10px] text-slate-500 font-semibold">({h.count})</span>
+        return (
+          <div className="space-y-6">
+            {patterns?.disclaimer && (
+              <div className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] text-xs text-slate-400 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                <p>{patterns.disclaimer}</p>
+              </div>
+            )}
+
+            {/* Visual Charts Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Chart 1: Format Distribution */}
+              <div className="p-5 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Content Format Frequency</span>
+                  </h3>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    {patterns?.total_observations || 0} observations
                   </span>
+                </div>
+                {formatChartData.length > 0 ? (
+                  <div className="h-44 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={formatChartData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                        <XAxis dataKey="format" stroke="#64748B" fontSize={11} />
+                        <YAxis stroke="#64748B" fontSize={11} allowDecimals={false} />
+                        <RechartsTooltip
+                          contentStyle={{ backgroundColor: '#0E1118', borderColor: '#1E2535', borderRadius: '8px', fontSize: '12px' }}
+                          itemStyle={{ color: '#E2E8F0' }}
+                        />
+                        <Bar dataKey="count" fill="#6366F1" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-44 flex items-center justify-center text-xs text-slate-500">
+                    No format data recorded yet.
+                  </div>
+                )}
+              </div>
+
+              {/* Chart 2: Hook Styles */}
+              <div className="p-5 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Opening Hook Style Breakdown</span>
+                  </h3>
+                  <span className="text-[11px] font-mono text-slate-500">
+                    {hookChartData.length} style types
+                  </span>
+                </div>
+                {hookChartData.length > 0 ? (
+                  <div className="h-44 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={hookChartData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+                        <XAxis dataKey="name" stroke="#64748B" fontSize={10} interval={0} />
+                        <YAxis stroke="#64748B" fontSize={11} allowDecimals={false} />
+                        <RechartsTooltip
+                          contentStyle={{ backgroundColor: '#0E1118', borderColor: '#1E2535', borderRadius: '8px', fontSize: '12px' }}
+                          itemStyle={{ color: '#E2E8F0' }}
+                        />
+                        <Bar dataKey="count" fill="#10B981" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="h-44 flex items-center justify-center text-xs text-slate-500">
+                    No hook data recorded yet.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Formats Grid */}
+            <div className="space-y-3">
+              <h2 className="text-base font-bold text-slate-100">Content Format Performance Cards</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {patterns?.formats.map((fmt) => (
+                  <div key={fmt.format} className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-2">
+                    <div className="flex items-center justify-between text-xs text-slate-400 uppercase font-semibold">
+                      <span className="capitalize">{fmt.format}</span>
+                      <span className="font-mono text-indigo-400">{fmt.percentage}%</span>
+                    </div>
+                    <div className="text-2xl font-bold text-slate-100 font-mono">
+                      {fmt.count}
+                    </div>
+                    <div className="text-[10px] text-slate-500 space-y-0.5 pt-1 border-t border-[#1E2535]">
+                      <div>Avg Views: {fmt.avg_views !== null && fmt.avg_views !== undefined ? fmt.avg_views.toLocaleString() : 'N/A (unreported)'}</div>
+                      <div>Avg Likes: {fmt.avg_likes !== null && fmt.avg_likes !== undefined ? fmt.avg_likes.toLocaleString() : 'N/A (unreported)'}</div>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Hook Styles */}
+            <div className="space-y-3 pt-2">
+              <h2 className="text-base font-bold text-slate-100">Opening Hook Styles & Examples</h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {patterns?.hook_types.map((ht) => (
+                  <div key={ht.hook_type} className="p-4 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-2">
+                    <div className="flex items-center justify-between text-xs font-semibold">
+                      <span className="capitalize text-slate-200">{ht.hook_type.replace('_', ' ')}</span>
+                      <span className="font-mono text-indigo-400">{ht.count} posts</span>
+                    </div>
+                    {ht.sample_examples.length > 0 && (
+                      <div className="space-y-1 pt-1">
+                        {ht.sample_examples.map((ex, i) => (
+                          <p key={i} className="text-[11px] text-slate-400 italic truncate bg-[#0E1118] p-1.5 rounded">
+                            &ldquo;{ex}&rdquo;
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Hashtags */}
+            {patterns?.top_hashtags && patterns.top_hashtags.length > 0 && (
+              <div className="space-y-3 pt-2">
+                <h2 className="text-base font-bold text-slate-100">Top Observed Hashtags</h2>
+                <div className="flex flex-wrap gap-2">
+                  {patterns.top_hashtags.map((h) => (
+                    <span
+                      key={h.tag}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#11151E] border border-[#1E2535] text-xs font-mono text-slate-300"
+                    >
+                      <Hash className="w-3 h-3 text-indigo-400" />
+                      <span>#{h.tag}</span>
+                      <span className="text-[10px] text-slate-500 font-semibold">({h.count})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Tab: Self-Improvement Proposals (Level B) */}
       {activeTab === 'proposals' && (

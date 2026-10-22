@@ -69,3 +69,33 @@ A documentation-only handoff inspection freshly confirmed the configured origina
   - Frontend Vitest suite: **4 passed**.
   - Frontend production build (	sc -b && vite build): Succeeded in 2.64s.
   - Original research database data/insight.db remains strictly untouched.
+
+## Interactive Intelligence Platform Transformation Milestone (2026-10-22)
+
+- **Scope:** Transformed text-based dashboard and reports into a responsive, interactive visual intelligence command center and dossier.
+- **Main Dashboard (Intelligence Command Center):**
+  - 5 interactive KPI cards linked to tasks, discoveries, reports, and Instagram strategy.
+  - Interactive Recharts visualizations: topic category breakdown (horizontal bar chart) and evidence integrity stance distribution (donut chart).
+  - Prioritized Instagram recommendation spotlight banner with direct action to experiment lab.
+  - Active in-flight research telemetry and recent completed runs with checkpoint counts and step progression.
+  - Live dependency engine status (DuckDuckGo, Ollama local model count, SQLite storage).
+- **Interactive Intelligence Dossier (Report View):**
+  - Interactive findings explorer with verification filters (Supported, Partially Supported, Contradicted, Unverified) and domain dropdown filter.
+  - Real-time search filter matching claims, notes, and evidence excerpts.
+  - Dedicated side-by-side Evidence Inspector panel displaying full claim statement, verification status, rationale, and grounding citations.
+  - Source-to-Claim Mapping Matrix cross-referencing which external URLs substantiate which specific findings.
+  - Domain citation frequency visualization (Recharts bar chart).
+  - Copy executive summary, copy GitHub markdown, and JSON export.
+- **Instagram Intelligence Studio:**
+  - Content format frequency and hook styles distribution visual charts (Recharts).
+  - Metric data coverage indicators (% with views, % with likes, % with comments) preserving strict nulls.
+  - Observed Content Ledger filters: format selector (Reel, Carousel, Image) and real-time text search.
+  - 'Create Experiment from Recommendation' action directly pre-populating the controlled experiment lab.
+- **Integrations API Fix:**
+  - Fixed DuckDuckGo health probe in ackend/app/api/v1/integrations.py to await health_check(), accurately reporting connected status.
+- **Verification Evidence:**
+  - Full backend test suite: **117 passed**.
+  - Live system E2E test (	est_e2e_live.py): **Passed**.
+  - Frontend Vitest suite (ResearchProgress.test.tsx, InteractiveDossier.test.tsx): **8 passed**.
+  - Frontend production build (	sc -b && vite build): Succeeded in 6.44s.
+  - Original research database data/insight.db remains strictly untouched.

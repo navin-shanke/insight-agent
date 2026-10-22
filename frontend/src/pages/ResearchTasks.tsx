@@ -224,13 +224,30 @@ export const ResearchTasks: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="p-3 rounded-lg bg-[#11151E] border border-[#1E2535] space-y-1">
+                    <div className="p-3 rounded-lg bg-[#11151E] border border-[#1E2535] space-y-2">
                       <span className="text-[10px] uppercase font-semibold text-slate-400 block">
                         Full Research Objective
                       </span>
                       <p className="text-xs text-slate-300 leading-relaxed font-sans">
                         {task.query}
                       </p>
+
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#1E2535]">
+                        <button
+                          onClick={() => window.location.assign('/reports')}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-[11px] font-medium transition-colors"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>View Reports Archive</span>
+                        </button>
+                        <button
+                          onClick={() => window.location.assign('/feed')}
+                          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[#161B27] hover:bg-[#1E2535] text-slate-300 border border-[#1E2535] text-[11px] font-medium transition-colors"
+                        >
+                          <Radio className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Inspect Discoveries</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

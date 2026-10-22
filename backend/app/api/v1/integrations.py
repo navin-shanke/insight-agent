@@ -46,12 +46,14 @@ async def _check_duckduckgo() -> ServiceStatus:
     """Check DuckDuckGo connector health."""
     try:
         from app.connectors.duckduckgo import DuckDuckGoConnector
+        from app.schemas.source import AccessStatus
         connector = DuckDuckGoConnector()
-        health = connector.health()
+        health = await connector.health_check()
+        is_ready = health.status == AccessStatus.READY
         return ServiceStatus(
             name="DuckDuckGo Search",
-            status="connected" if health.get("status") == "READY" else "disconnected",
-            detail=health.get("status", ""),
+            status="connected" if is_ready else "disconnected",
+            detail=health.message or ("Ready" if is_ready else "Degraded"),
         )
     except Exception as exc:
         return ServiceStatus(name="DuckDuckGo Search", status="disconnected", detail=str(exc)[:120])
