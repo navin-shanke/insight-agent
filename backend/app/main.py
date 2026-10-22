@@ -71,8 +71,9 @@ def create_app() -> FastAPI:
         # DuckDuckGo probe
         try:
             from app.connectors.duckduckgo import DuckDuckGoConnector
-            h = DuckDuckGoConnector().health()
-            checks["duckduckgo"] = "ready" if h.get("status") == "READY" else "unavailable"
+            from app.schemas.source import AccessStatus
+            h = await DuckDuckGoConnector().health_check()
+            checks["duckduckgo"] = "ready" if h.status == AccessStatus.READY else "unavailable"
         except Exception:
             checks["duckduckgo"] = "unavailable"
 

@@ -52,7 +52,7 @@ def _report_to_out(r: Report) -> ReportOut:
 
 
 def _report_to_detail(r: Report, session: Optional[Session] = None) -> ReportDetailOut:
-    body_md = r.body_md or ""
+    body_md = (r.body_md or "").replace("\r\n", "\n")
     findings: list[ReportFinding] = []
     sources_dict: dict[str, str] = {}
 
@@ -151,7 +151,7 @@ def _report_to_detail(r: Report, session: Optional[Session] = None) -> ReportDet
     exec_summary = r.summary
     if not exec_summary:
         exec_match = re.search(
-            r"(?:#+\s*Executive Summary|#+\s*Summary|#+\s*Overview)\s*\n+([\s\S]+?)(?=\n#+|$)",
+            r"(?:#+\s*(?:Executive\s+)?Summary|#+\s*Overview|#+\s*Findings(?:\s+Summary)?)\s*\n+([\s\S]+?)(?=\n#+|$)",
             body_md,
             re.IGNORECASE,
         )
@@ -164,6 +164,9 @@ def _report_to_detail(r: Report, session: Optional[Session] = None) -> ReportDet
             ]
             if paragraphs:
                 exec_summary = paragraphs[0]
+
+    if not exec_summary:
+        exec_summary = f"Research synthesis for '{r.query or r.title}'. Total {len(findings)} findings extracted across {len(sources_dict)} verified sources."
 
     # Metrics
     supported = sum(1 for f in findings if f.verification_status == "SUPPORTED")

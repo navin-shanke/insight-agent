@@ -93,6 +93,7 @@ class InstagramStrategyProfile(BaseModel):
     last_updated: datetime
     promising_patterns: List[PromisingPattern] = Field(default_factory=list)
     tested_hypotheses: List[TestedHypothesis] = Field(default_factory=list)
+    recommendations: List[InstagramRecommendation] = Field(default_factory=list)
     user_feedback: List[UserFeedbackItem] = Field(default_factory=list)
     learning_notes: List[str] = Field(default_factory=list)
 
@@ -146,3 +147,59 @@ class InstagramPatternsResponse(BaseModel):
     hook_types: List[HookTypeBreakdown]
     top_hashtags: List[dict]
     disclaimer: str
+
+
+class InstagramRecommendation(BaseModel):
+    """Actionable, prioritized recommendation with 7-point evidence and contingency structure."""
+    id: str
+    title: str
+    category: Literal[
+        "content_theme",
+        "opening_hook",
+        "format_choice",
+        "posting_window",
+        "underperforming_pattern",
+        "data_gap",
+    ]
+    priority: Literal["high", "medium", "low"]
+    what_to_do: str
+    why_recommended: str
+    supporting_evidence: str
+    confidence_and_limitations: str
+    expected_outcome: str
+    measurement_plan: str
+    contingency_plan: str
+    evidence_sample_size: int
+    status: Literal["active", "accepted", "rejected", "testing"] = "active"
+    created_at: datetime
+
+
+class InstagramStrategyVersionOut(BaseModel):
+    """Versioned checkpoint of the adaptive strategy profile."""
+    version: int
+    change_trigger: str
+    change_summary: str
+    sample_size: int
+    created_at: datetime
+    snapshot: Optional[dict] = None
+
+
+class SystemImprovementProposal(BaseModel):
+    """Level B: Diagnostic proposed software improvement requiring explicit review."""
+    id: str
+    title: str
+    component: str
+    severity: Literal["info", "warning", "error", "critical"]
+    root_cause_analysis: str
+    candidate_patch_diff: str
+    verification_plan: str
+    risk_level: Literal["low", "medium", "high"]
+    status: Literal["PENDING_REVIEW", "APPROVED", "REJECTED", "APPLIED"] = "PENDING_REVIEW"
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None
+    review_notes: Optional[str] = None
+
+
+class ProposalReviewIn(BaseModel):
+    action: Literal["APPROVED", "REJECTED"]
+    review_notes: Optional[str] = None

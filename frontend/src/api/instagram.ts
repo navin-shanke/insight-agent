@@ -3,7 +3,11 @@ import {
   InstagramExperiment,
   InstagramObservation,
   InstagramPatternsResponse,
+  InstagramRecommendation,
   InstagramStrategyProfile,
+  InstagramStrategyVersionOut,
+  ProposalReviewIn,
+  SystemImprovementProposal,
   UserFeedbackItem,
 } from '../types';
 
@@ -87,5 +91,33 @@ export async function recordExperimentOutcome(
   const res = await apiClient.patch<InstagramExperiment>(`/instagram/experiments/${expId}/outcome`, null, {
     params: { outcome_summary: outcomeSummary, status },
   });
+  return res.data;
+}
+
+export async function fetchInstagramRecommendations(): Promise<InstagramRecommendation[]> {
+  const res = await apiClient.get<InstagramRecommendation[]>('/instagram/recommendations');
+  return res.data;
+}
+
+export async function fetchInstagramStrategyHistory(): Promise<InstagramStrategyVersionOut[]> {
+  const res = await apiClient.get<InstagramStrategyVersionOut[]>('/instagram/strategy/history');
+  return res.data;
+}
+
+export async function rollbackInstagramStrategy(version: number): Promise<InstagramStrategyProfile> {
+  const res = await apiClient.post<InstagramStrategyProfile>(`/instagram/strategy/rollback/${version}`);
+  return res.data;
+}
+
+export async function fetchSystemImprovementProposals(): Promise<SystemImprovementProposal[]> {
+  const res = await apiClient.get<SystemImprovementProposal[]>('/instagram/proposals');
+  return res.data;
+}
+
+export async function reviewSystemImprovementProposal(
+  proposalId: string,
+  review: ProposalReviewIn
+): Promise<SystemImprovementProposal> {
+  const res = await apiClient.post<SystemImprovementProposal>(`/instagram/proposals/${proposalId}/review`, review);
   return res.data;
 }

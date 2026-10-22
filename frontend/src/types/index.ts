@@ -229,12 +229,59 @@ export interface UserFeedbackItem {
   created_at: string;
 }
 
+export interface InstagramRecommendation {
+  id: string;
+  title: string;
+  category: 'content_theme' | 'opening_hook' | 'format_choice' | 'posting_window' | 'underperforming_pattern' | 'data_gap';
+  priority: 'high' | 'medium' | 'low';
+  what_to_do: string;
+  why_recommended: string;
+  supporting_evidence: string;
+  confidence_and_limitations: string;
+  expected_outcome: string;
+  measurement_plan: string;
+  contingency_plan: string;
+  evidence_sample_size: number;
+  status: 'active' | 'accepted' | 'rejected' | 'testing';
+  created_at: string;
+}
+
+export interface InstagramStrategyVersionOut {
+  version: number;
+  change_trigger: string;
+  change_summary: string;
+  sample_size: number;
+  created_at: string;
+  snapshot?: any;
+}
+
+export interface SystemImprovementProposal {
+  id: string;
+  title: string;
+  component: string;
+  severity: 'info' | 'warning' | 'error' | 'critical';
+  root_cause_analysis: string;
+  candidate_patch_diff: string;
+  verification_plan: string;
+  risk_level: 'low' | 'medium' | 'high';
+  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED' | 'APPLIED';
+  created_at: string;
+  reviewed_at?: string | null;
+  review_notes?: string | null;
+}
+
+export interface ProposalReviewIn {
+  action: 'APPROVED' | 'REJECTED';
+  review_notes?: string | null;
+}
+
 export interface InstagramStrategyProfile {
   version: number;
   sample_size: number;
   last_updated: string;
   promising_patterns: PromisingPattern[];
   tested_hypotheses: TestedHypothesis[];
+  recommendations?: InstagramRecommendation[];
   user_feedback: UserFeedbackItem[];
   learning_notes: string[];
 }

@@ -305,3 +305,138 @@ DuckDuckGo search provider.
     domains = [s.domain for s in detail.sources]
     assert "anthropic.com" in domains
     assert "github.com" in domains
+
+
+# ---------------------------------------------------------------------------
+# 8. Actionable Recommendations & 7-Point Structure Test
+# ---------------------------------------------------------------------------
+def test_recommendations_and_7_point_structure(temp_insta_service):
+    svc = temp_insta_service
+
+    # Ingest 2 carousels and 1 reel
+    svc.ingest_observation(
+        InstagramObservationIn(
+            source_url="https://instagram.com/p/c1",
+            format="carousel",
+            caption="Slide 1: Stop hardcoding configs.\n#DevOps",
+            collection_method="manual_entry",
+            metrics=InstagramMetrics(likes=150, saves=85),
+        )
+    )
+    svc.ingest_observation(
+        InstagramObservationIn(
+            source_url="https://instagram.com/p/c2",
+            format="carousel",
+            caption="Slide 1: 5 Architecture Patterns for 2026.\n#SystemDesign",
+            collection_method="manual_entry",
+            metrics=InstagramMetrics(likes=200, saves=120),
+        )
+    )
+    svc.ingest_observation(
+        InstagramObservationIn(
+            source_url="https://instagram.com/p/r1",
+            format="reel",
+            caption="Why your database is running out of connections.\n#PostgreSQL",
+            collection_method="manual_entry",
+            metrics=InstagramMetrics(likes=90, comments=15),
+        )
+    )
+
+    recs = svc.get_recommendations()
+    assert len(recs) >= 3
+
+    # Verify each recommendation satisfies all 7 explicit required points
+    for rec in recs:
+        assert rec.what_to_do, f"{rec.id} missing what_to_do"
+        assert rec.why_recommended, f"{rec.id} missing why_recommended"
+        assert rec.supporting_evidence, f"{rec.id} missing supporting_evidence"
+        assert rec.confidence_and_limitations, f"{rec.id} missing confidence_and_limitations"
+        assert rec.expected_outcome, f"{rec.id} missing expected_outcome"
+        assert rec.measurement_plan, f"{rec.id} missing measurement_plan"
+        assert rec.contingency_plan, f"{rec.id} missing contingency_plan"
+        assert rec.priority in ("high", "medium", "low")
+
+    # Reject recommendation and verify it is excluded
+    svc.record_feedback(
+        InstagramFeedbackIn(
+            target_id="rec-format-carousel",
+            target_type="recommendation",
+            action="rejected",
+            user_note="Not producing carousels this quarter.",
+        )
+    )
+    updated_recs = svc.get_recommendations()
+    rec_ids = [r.id for r in updated_recs]
+    assert "rec-format-carousel" not in rec_ids
+
+
+# ---------------------------------------------------------------------------
+# 9. Strategy Version History & Rollback Test
+# ---------------------------------------------------------------------------
+def test_strategy_version_history_and_rollback(temp_insta_service):
+    svc = temp_insta_service
+
+    # Initial checkpoint on ingestion
+    svc.ingest_observation(
+        InstagramObservationIn(
+            source_url="https://instagram.com/p/test1",
+            format="reel",
+            caption="Avoid this silent bug in FastAPI.\n#Python",
+            collection_method="manual_entry",
+        )
+    )
+
+    history = svc.get_strategy_history()
+    assert len(history) >= 1
+    assert history[0].version >= 1
+    assert "observation_ingested" in history[0].change_trigger
+
+    v1 = history[0].version
+
+    # Add feedback which creates v2
+    svc.record_feedback(
+        InstagramFeedbackIn(
+            target_id="hyp-short-hooks",
+            target_type="experiment",
+            action="rejected",
+            user_note="Audience prefers in-depth technical preambles.",
+        )
+    )
+
+    history_after_fb = svc.get_strategy_history()
+    assert len(history_after_fb) >= 2
+    assert history_after_fb[0].version > v1
+
+    # Test Rollback
+    rolled_back = svc.rollback_strategy_version(v1)
+    assert rolled_back is not None
+
+    latest_history = svc.get_strategy_history()
+    assert latest_history[0].change_trigger == "rollback"
+
+
+# ---------------------------------------------------------------------------
+# 10. System Improvement Proposals & Review Workflow Test
+# ---------------------------------------------------------------------------
+def test_system_improvement_proposals_and_review(temp_insta_service):
+    svc = temp_insta_service
+
+    proposals = svc.generate_diagnostic_proposals()
+    assert len(proposals) >= 2
+    assert all(p.status == "PENDING_REVIEW" for p in proposals)
+
+    prop = proposals[0]
+    assert prop.candidate_patch_diff
+    assert prop.verification_plan
+    assert prop.risk_level in ("low", "medium", "high")
+
+    # Review: Approve
+    from app.schemas.api.instagram import ProposalReviewIn
+    approved = svc.review_improvement_proposal(
+        prop.id,
+        ProposalReviewIn(action="APPROVED", review_notes="Approved for indexing."),
+    )
+    assert approved is not None
+    assert approved.status in ("APPROVED", "APPLIED")
+    assert approved.reviewed_at is not None
+    assert approved.review_notes == "Approved for indexing."

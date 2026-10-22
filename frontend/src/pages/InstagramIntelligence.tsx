@@ -23,6 +23,11 @@ import {
   Scale,
   Brain,
   History,
+  Compass,
+  RotateCcw,
+  Wrench,
+  Code,
+  ShieldAlert,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { SkeletonCard } from '../design-system/components/SkeletonCard';
@@ -32,6 +37,11 @@ import {
   fetchInstagramPatterns,
   fetchInstagramStrategy,
   fetchInstagramExperiments,
+  fetchInstagramRecommendations,
+  fetchInstagramStrategyHistory,
+  rollbackInstagramStrategy,
+  fetchSystemImprovementProposals,
+  reviewSystemImprovementProposal,
   ingestInstagramObservation,
   submitInstagramFeedback,
   createInstagramExperiment,
@@ -41,17 +51,23 @@ import {
   InstagramExperiment,
   InstagramObservation,
   InstagramPatternsResponse,
+  InstagramRecommendation,
   InstagramStrategyProfile,
+  InstagramStrategyVersionOut,
+  SystemImprovementProposal,
 } from '../types';
 
 export const InstagramIntelligence: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'strategy' | 'experiments' | 'content' | 'patterns'>('strategy');
+  const [activeTab, setActiveTab] = useState<'recommendations' | 'strategy' | 'experiments' | 'content' | 'patterns' | 'proposals'>('recommendations');
 
   const [loading, setLoading] = useState(true);
   const [strategy, setStrategy] = useState<InstagramStrategyProfile | null>(null);
   const [patterns, setPatterns] = useState<InstagramPatternsResponse | null>(null);
   const [experiments, setExperiments] = useState<InstagramExperiment[]>([]);
   const [observations, setObservations] = useState<InstagramObservation[]>([]);
+  const [recommendations, setRecommendations] = useState<InstagramRecommendation[]>([]);
+  const [strategyHistory, setStrategyHistory] = useState<InstagramStrategyVersionOut[]>([]);
+  const [proposals, setProposals] = useState<SystemImprovementProposal[]>([]);
 
   // Ingest Modal state
   const [showIngestModal, setShowIngestModal] = useState(false);
@@ -91,20 +107,65 @@ export const InstagramIntelligence: React.FC = () => {
 
   const loadAll = async () => {
     try {
-      const [sRes, pRes, eRes, oRes] = await Promise.all([
+      const [sRes, pRes, eRes, oRes, rRes, hRes, propRes] = await Promise.all([
         fetchInstagramStrategy(),
         fetchInstagramPatterns(),
         fetchInstagramExperiments(),
         fetchInstagramObservations(100),
+        fetchInstagramRecommendations(),
+        fetchInstagramStrategyHistory(),
+        fetchSystemImprovementProposals(),
       ]);
       setStrategy(sRes);
       setPatterns(pRes);
       setExperiments(eRes);
       setObservations(oRes.items || []);
+      setRecommendations(rRes || []);
+      setStrategyHistory(hRes || []);
+      setProposals(propRes || []);
     } catch (err) {
       toast.error('Failed to load Instagram learning data');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRecommendationAction = async (recId: string, action: 'accepted' | 'rejected') => {
+    try {
+      await submitInstagramFeedback({
+        target_id: recId,
+        target_type: 'recommendation',
+        action,
+        user_note: `User explicitly ${action} recommendation`,
+      });
+      toast.success(`Recommendation ${action}`);
+      await loadAll();
+    } catch {
+      toast.error('Failed to update recommendation status');
+    }
+  };
+
+  const handleRollback = async (ver: number) => {
+    if (!window.confirm(`Are you sure you want to revert strategy profile to Version ${ver}?`)) return;
+    try {
+      await rollbackInstagramStrategy(ver);
+      toast.success(`Rolled back to strategy Version ${ver}`);
+      await loadAll();
+    } catch {
+      toast.error('Failed to rollback strategy');
+    }
+  };
+
+  const handleReviewProposalAction = async (propId: string, action: 'APPROVED' | 'REJECTED') => {
+    try {
+      await reviewSystemImprovementProposal(propId, {
+        action,
+        review_notes: `User explicitly ${action.toLowerCase()} candidate improvement`,
+      });
+      toast.success(`Proposal ${action}`);
+      await loadAll();
+    } catch {
+      toast.error('Failed to review proposal');
     }
   };
 
@@ -301,22 +362,39 @@ export const InstagramIntelligence: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-[#1E2535] text-xs">
+      <div className="flex items-center gap-1 border-b border-[#1E2535] text-xs overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('recommendations')}
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'recommendations'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Compass className="w-3.5 h-3.5" />
+          <span>Strategic Recommendations</span>
+          {recommendations.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-mono">
+              {recommendations.length}
+            </span>
+          )}
+        </button>
+
         <button
           onClick={() => setActiveTab('strategy')}
-          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
             activeTab === 'strategy'
               ? 'border-indigo-500 text-indigo-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Strategy Profile & Hypotheses</span>
+          <span>Strategy Profile & History</span>
         </button>
 
         <button
           onClick={() => setActiveTab('experiments')}
-          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
             activeTab === 'experiments'
               ? 'border-indigo-500 text-indigo-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -333,7 +411,7 @@ export const InstagramIntelligence: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('content')}
-          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
             activeTab === 'content'
               ? 'border-indigo-500 text-indigo-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -350,16 +428,174 @@ export const InstagramIntelligence: React.FC = () => {
 
         <button
           onClick={() => setActiveTab('patterns')}
-          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
             activeTab === 'patterns'
               ? 'border-indigo-500 text-indigo-400'
               : 'border-transparent text-slate-400 hover:text-slate-200'
           }`}
         >
           <TrendingUp className="w-3.5 h-3.5" />
-          <span>Pattern & Format Analysis</span>
+          <span>Pattern Analysis</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('proposals')}
+          className={`px-4 py-2.5 font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'proposals'
+              ? 'border-indigo-500 text-indigo-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Wrench className="w-3.5 h-3.5" />
+          <span>Self-Improvement (Level B)</span>
+          {proposals.filter((p) => p.status === 'PENDING_REVIEW').length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-mono">
+              {proposals.filter((p) => p.status === 'PENDING_REVIEW').length}
+            </span>
+          )}
         </button>
       </div>
+
+      {/* Tab: Strategic Recommendations (7-Point Explanations) */}
+      {activeTab === 'recommendations' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Compass className="w-4 h-4 text-indigo-400" />
+                <span>Prioritized Content Recommendations</span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                Actionable content recommendations structured with explicit evidence, confidence thresholds, and contingency workflows.
+              </p>
+            </div>
+            <div className="text-xs text-slate-400 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>Evidence-calibrated</span>
+            </div>
+          </div>
+
+          {recommendations.length === 0 ? (
+            <EmptyState
+              title="No recommendations generated yet"
+              description="Ingest post observations to populate evidence-based recommendations."
+            />
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {recommendations.map((rec) => {
+                const priorityColors = {
+                  high: 'bg-rose-500/10 text-rose-300 border-rose-500/30',
+                  medium: 'bg-amber-500/10 text-amber-300 border-amber-500/30',
+                  low: 'bg-slate-500/10 text-slate-300 border-slate-500/30',
+                };
+                const catLabels: Record<string, string> = {
+                  data_gap: 'Data Gap / Benchmark',
+                  format_choice: 'Format Selection',
+                  opening_hook: 'Hook Architecture',
+                  underperforming_pattern: 'Friction Elimination',
+                  content_theme: 'Content Theme',
+                  posting_window: 'Posting Window',
+                };
+
+                return (
+                  <div
+                    key={rec.id}
+                    className="p-5 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-4 hover:border-slate-700 transition-colors"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#1E2535] pb-3">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold tracking-wider uppercase border ${priorityColors[rec.priority]}`}
+                          >
+                            {rec.priority} Priority
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-[#161B27] text-slate-300 border border-[#1E2535]">
+                            {catLabels[rec.category] || rec.category}
+                          </span>
+                          <span className="text-[11px] text-slate-400 font-mono">
+                            Sample N={rec.evidence_sample_size}
+                          </span>
+                        </div>
+                        <h3 className="text-base font-semibold text-slate-100">{rec.title}</h3>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleRecommendationAction(rec.id, 'accepted')}
+                          className="flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Accept</span>
+                        </button>
+                        <button
+                          onClick={() => handleRecommendationAction(rec.id, 'rejected')}
+                          className="flex items-center gap-1 px-3 py-1 text-xs font-medium rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/30 hover:bg-rose-500/20 transition-colors"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          <span>Reject</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 7-Point Breakdown Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      <div className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535]/60 space-y-1">
+                        <span className="text-[10px] font-semibold text-indigo-400 uppercase tracking-wider block">
+                          1. Action Plan (What to do)
+                        </span>
+                        <p className="text-slate-200 leading-relaxed">{rec.what_to_do}</p>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535]/60 space-y-1">
+                        <span className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider block">
+                          2. Rationale (Why it is recommended)
+                        </span>
+                        <p className="text-slate-300 leading-relaxed">{rec.why_recommended}</p>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535]/60 space-y-1">
+                        <span className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider block">
+                          3. Supporting Evidence
+                        </span>
+                        <p className="text-slate-300 leading-relaxed">{rec.supporting_evidence}</p>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535]/60 space-y-1">
+                        <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider block">
+                          4. Confidence & Caveats
+                        </span>
+                        <p className="text-slate-300 leading-relaxed">{rec.confidence_and_limitations}</p>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535]/60 space-y-1">
+                        <span className="text-[10px] font-semibold text-purple-400 uppercase tracking-wider block">
+                          5. Expected Outcome
+                        </span>
+                        <p className="text-slate-300 leading-relaxed">{rec.expected_outcome}</p>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535]/60 space-y-1">
+                        <span className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider block">
+                          6. Measurement Plan
+                        </span>
+                        <p className="text-slate-300 leading-relaxed">{rec.measurement_plan}</p>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535]/60 space-y-1 text-xs">
+                      <span className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider block">
+                        7. Contingency Plan (Next action if outcome fails)
+                      </span>
+                      <p className="text-slate-300 leading-relaxed">{rec.contingency_plan}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Tab 1: Strategy & Hypotheses */}
       {activeTab === 'strategy' && (
@@ -526,6 +762,59 @@ export const InstagramIntelligence: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Strategy Version History & Audit Trail */}
+          <div className="space-y-3 pt-4 border-t border-[#1E2535]">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                  <History className="w-4 h-4 text-indigo-400" />
+                  <span>Strategy Profile Version History & Audit Trail</span>
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Every observation ingestion, feedback submission, and experiment outcome creates an immutable version checkpoint.
+                </p>
+              </div>
+            </div>
+
+            {strategyHistory.length === 0 ? (
+              <p className="text-xs text-slate-500 italic">No historical checkpoints recorded yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {strategyHistory.map((item) => (
+                  <div
+                    key={item.version}
+                    className="p-3 rounded-lg bg-[#0E1118] border border-[#1E2535] flex items-center justify-between gap-4 text-xs"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="px-2 py-0.5 rounded font-mono font-bold bg-indigo-500/20 text-indigo-300 text-[11px] border border-indigo-500/30">
+                        v{item.version}
+                      </span>
+                      <div>
+                        <div className="font-medium text-slate-200">{item.change_summary}</div>
+                        <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
+                          <span>Trigger: {item.change_trigger}</span>
+                          <span>•</span>
+                          <span>Sample size: {item.sample_size}</span>
+                          <span>•</span>
+                          <span>{new Date(item.created_at).toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleRollback(item.version)}
+                      className="flex items-center gap-1 px-2.5 py-1 text-[11px] rounded bg-[#161B27] hover:bg-[#1E2535] text-slate-300 border border-[#1E2535] transition-colors"
+                      title="Rollback strategy profile to this checkpoint"
+                    >
+                      <RotateCcw className="w-3 h-3 text-slate-400" />
+                      <span>Revert</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -822,6 +1111,115 @@ export const InstagramIntelligence: React.FC = () => {
                   </span>
                 ))}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Self-Improvement Proposals (Level B) */}
+      {activeTab === 'proposals' && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <Wrench className="w-4 h-4 text-amber-400" />
+                <span>Level B: Self-Improvement & Diagnostic Proposals</span>
+              </h2>
+              <p className="text-xs text-slate-400">
+                The agent diagnoses recurring bottlenecks, missing indexes, and timeout risks, proposing reviewable patches.
+                Changes require explicit user approval before application.
+              </p>
+            </div>
+            <div className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-300 text-xs border border-amber-500/30 flex items-center gap-1.5 font-medium">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Approval Required</span>
+            </div>
+          </div>
+
+          {proposals.length === 0 ? (
+            <EmptyState
+              title="No improvement proposals pending"
+              description="System diagnostics report optimal operating state."
+            />
+          ) : (
+            <div className="space-y-4">
+              {proposals.map((prop) => (
+                <div
+                  key={prop.id}
+                  className="p-5 rounded-xl bg-[#11151E] border border-[#1E2535] space-y-4"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#1E2535] pb-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                            prop.status === 'PENDING_REVIEW'
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                              : prop.status === 'APPROVED' || prop.status === 'APPLIED'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                          }`}
+                        >
+                          {prop.status}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-[#161B27] text-slate-300 border border-[#1E2535]">
+                          Component: {prop.component}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-[#161B27] text-slate-400 border border-[#1E2535]">
+                          Risk: {prop.risk_level.toUpperCase()}
+                        </span>
+                      </div>
+                      <h3 className="text-base font-semibold text-slate-100">{prop.title}</h3>
+                    </div>
+
+                    {prop.status === 'PENDING_REVIEW' && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleReviewProposalAction(prop.id, 'APPROVED')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Approve & Apply</span>
+                        </button>
+                        <button
+                          onClick={() => handleReviewProposalAction(prop.id, 'REJECTED')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-rose-500/10 text-rose-300 border border-rose-500/30 hover:bg-rose-500/20 transition-colors"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          <span>Reject</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 text-xs">
+                    <div>
+                      <span className="font-semibold text-slate-300 block mb-1">Root Cause Analysis:</span>
+                      <p className="text-slate-400 leading-relaxed">{prop.root_cause_analysis}</p>
+                    </div>
+
+                    <div>
+                      <span className="font-semibold text-slate-300 block mb-1">Verification Command:</span>
+                      <pre className="p-2.5 rounded-lg bg-[#0E1118] border border-[#1E2535] text-cyan-300 font-mono text-[11px] overflow-x-auto">
+                        {prop.verification_plan}
+                      </pre>
+                    </div>
+
+                    <div>
+                      <span className="font-semibold text-slate-300 block mb-1">Candidate Patch (Diff):</span>
+                      <pre className="p-3 rounded-lg bg-slate-950 border border-slate-800 text-emerald-400 font-mono text-[11px] leading-relaxed overflow-x-auto">
+                        {prop.candidate_patch_diff}
+                      </pre>
+                    </div>
+
+                    {prop.reviewed_at && (
+                      <div className="p-2.5 rounded-lg bg-[#161B27] border border-[#1E2535] text-[11px] text-slate-400">
+                        Reviewed at: {new Date(prop.reviewed_at).toLocaleString()} • Notes: {prop.review_notes || 'None'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

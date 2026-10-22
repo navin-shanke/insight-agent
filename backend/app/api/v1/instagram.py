@@ -16,6 +16,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.v1.auth import get_current_user
 from app.schemas.api.auth import TokenData
 from app.schemas.api.instagram import (
+    FormatBreakdown,
+    HookTypeBreakdown,
     InstagramExperimentIn,
     InstagramExperimentOut,
     InstagramFeedbackIn,
@@ -23,7 +25,11 @@ from app.schemas.api.instagram import (
     InstagramObservationListResponse,
     InstagramObservationOut,
     InstagramPatternsResponse,
+    InstagramRecommendation,
     InstagramStrategyProfile,
+    InstagramStrategyVersionOut,
+    ProposalReviewIn,
+    SystemImprovementProposal,
     UserFeedbackItem,
 )
 from app.services.instagram_learning import InstagramLearningService
@@ -147,4 +153,73 @@ async def record_experiment_outcome(
     updated = svc.record_experiment_outcome(exp_id, outcome_summary=outcome_summary, status=status)
     if not updated:
         raise HTTPException(status_code=404, detail="Experiment not found")
+    return updated
+
+
+@router.get(
+    "/recommendations",
+    response_model=List[InstagramRecommendation],
+    summary="List prioritized recommendations with 7-point evidence and contingency plans",
+)
+async def list_recommendations(
+    _user: TokenData = Depends(get_current_user),
+) -> List[InstagramRecommendation]:
+    svc = _get_service()
+    return svc.get_recommendations()
+
+
+@router.get(
+    "/strategy/history",
+    response_model=List[InstagramStrategyVersionOut],
+    summary="View versioned history and audit trail of strategy profile adaptations",
+)
+async def get_strategy_history(
+    _user: TokenData = Depends(get_current_user),
+) -> List[InstagramStrategyVersionOut]:
+    svc = _get_service()
+    return svc.get_strategy_history()
+
+
+@router.post(
+    "/strategy/rollback/{version}",
+    response_model=InstagramStrategyProfile,
+    summary="Safely rollback to a previous strategy version",
+)
+async def rollback_strategy(
+    version: int,
+    _user: TokenData = Depends(get_current_user),
+) -> InstagramStrategyProfile:
+    svc = _get_service()
+    profile = svc.rollback_strategy_version(version)
+    if not profile:
+        raise HTTPException(status_code=404, detail=f"Strategy version {version} not found")
+    return profile
+
+
+@router.get(
+    "/proposals",
+    response_model=List[SystemImprovementProposal],
+    summary="List Level B diagnostic proposed software improvements awaiting user review",
+)
+async def list_proposals(
+    _user: TokenData = Depends(get_current_user),
+) -> List[SystemImprovementProposal]:
+    svc = _get_service()
+    return svc.generate_diagnostic_proposals()
+
+
+@router.post(
+    "/proposals/{proposal_id}/review",
+    response_model=SystemImprovementProposal,
+    summary="Review (approve or reject) a proposed software improvement",
+)
+async def review_proposal(
+    proposal_id: str,
+    review: ProposalReviewIn,
+    _user: TokenData = Depends(get_current_user),
+) -> SystemImprovementProposal:
+    svc = _get_service()
+    updated = svc.review_improvement_proposal(proposal_id, review)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Proposal {proposal_id} not found")
     return updated
