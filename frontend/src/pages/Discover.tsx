@@ -11,6 +11,9 @@ import {
   ArrowRight,
   AlertCircle,
   CheckCircle2,
+  Shield,
+  Activity,
+  History,
 } from 'lucide-react';
 import { submitResearch } from '../api/research';
 
@@ -27,10 +30,31 @@ export const Discover: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const samplePrompts = [
-    'Find emerging AI agent frameworks released in the past 6 months and compare their architecture.',
-    'Investigate open-source local LLM quantization techniques and benchmark accuracy claims.',
-    'Identify recent autonomous research tooling in biotechnology and evaluate their claim verification methods.',
+  const samplePresets = [
+    {
+      category: 'Market Intel',
+      prompt: 'Identify emerging agentic AI frameworks launched in 2025-2026, comparing orchestration architecture and verified performance.',
+      sources: 30,
+      iterations: 3,
+    },
+    {
+      category: 'Competitor Landscape',
+      prompt: 'Benchmark open-source local LLM quantization runtimes (vLLM, Ollama, SGLang, llama.cpp) across latency and VRAM footprint.',
+      sources: 25,
+      iterations: 2,
+    },
+    {
+      category: 'Technical Verification',
+      prompt: 'Investigate claim verification techniques in autonomous research agents, identifying multi-source corroboration algorithms.',
+      sources: 20,
+      iterations: 3,
+    },
+    {
+      category: 'Instagram Strategy',
+      prompt: 'Analyze high-engagement short-form video hooks for B2B tech accounts, extracting retention principles and posting cadence.',
+      sources: 25,
+      iterations: 2,
+    },
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -49,7 +73,7 @@ export const Discover: React.FC = () => {
         token_budget: tokenBudget,
       });
 
-      // Navigate to Research Tasks view to track progress
+      // Navigate to Research Tasks view with highlighted task
       navigate(`/tasks?highlight=${task.task_id}`);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to dispatch research task');
@@ -58,18 +82,30 @@ export const Discover: React.FC = () => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
+    <div className="max-w-4xl mx-auto space-y-6 animate-fade-in">
       {/* Header */}
-      <div>
-        <div className="flex items-center gap-2 mb-1">
-          <Compass className="w-5 h-5 text-indigo-400" />
-          <h1 className="text-2xl font-bold tracking-tight text-slate-100">
-            Research Prompt Composer
-          </h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#1E2535]">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
+              <Compass className="w-5 h-5" />
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-100">
+              Research Prompt Composer
+            </h1>
+          </div>
+          <p className="text-xs text-slate-400">
+            Configure bounded autonomous investigations. Set query depth, safety fences, and resource budgets.
+          </p>
         </div>
-        <p className="text-xs text-slate-400">
-          Configure a bounded autonomous investigation. Set query depth, safety fences, and resource budgets.
-        </p>
+
+        <button
+          onClick={() => navigate('/tasks')}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#11151E] border border-[#1E2535] hover:border-slate-700 text-xs font-medium text-slate-300 transition-colors"
+        >
+          <History className="w-3.5 h-3.5 text-indigo-400" />
+          <span>Active Tasks</span>
+        </button>
       </div>
 
       {error && (
@@ -81,11 +117,11 @@ export const Discover: React.FC = () => {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Prompt Input Box */}
-        <div className="bg-[#11151E] border border-[#1E2535] rounded-xl p-5 space-y-3 shadow-lg shadow-black/20 focus-within:border-indigo-500/50 transition-colors">
+        <div className="bg-[#11151E] border border-[#1E2535] rounded-xl p-5 space-y-4 shadow-xl shadow-black/20 focus-within:border-indigo-500/50 transition-colors">
           <div className="flex items-center justify-between text-xs font-medium text-slate-300">
             <span className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-indigo-400" />
-              <span>Research Objective or Question</span>
+              <span>Investigation Directive or Question</span>
             </span>
             <span className="text-[11px] text-slate-400 font-mono">
               {query.length} / 2000 chars
@@ -98,24 +134,34 @@ export const Discover: React.FC = () => {
             maxLength={2000}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="e.g. Find emerging AI automation startups in India, verify their products and identify recent funding or launch announcements."
+            placeholder="e.g. Find emerging agentic AI platforms, verify their claims regarding multi-step reasoning, and assess real-world benchmark evaluations."
             className="w-full bg-[#0E1118] border border-[#1E2535] rounded-lg p-3 text-xs text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-indigo-500/60 leading-relaxed transition-colors resize-none"
           />
 
-          {/* Prompt quick templates */}
-          <div className="space-y-1.5 pt-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              Preset Examples
+          {/* Quick preset templates */}
+          <div className="space-y-2 pt-1 border-t border-[#1E2535]/60">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 font-mono">
+              Investigation Presets
             </span>
-            <div className="flex flex-wrap gap-2">
-              {samplePrompts.map((p, idx) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {samplePresets.map((preset, idx) => (
                 <button
                   type="button"
                   key={idx}
-                  onClick={() => setQuery(p)}
-                  className="text-left text-[11px] px-2.5 py-1 rounded-md bg-[#161B27] hover:bg-[#1E2538] text-slate-300 hover:text-indigo-300 border border-[#1E2535] transition-colors"
+                  onClick={() => {
+                    setQuery(preset.prompt);
+                    setSourceBudget(preset.sources);
+                    setMaxIterations(preset.iterations);
+                  }}
+                  className="text-left p-2.5 rounded-lg bg-[#0E1118] hover:bg-[#161B27] text-slate-300 hover:text-indigo-300 border border-[#1E2535] hover:border-indigo-500/30 transition-all flex flex-col gap-1 group"
                 >
-                  {p.slice(0, 56)}...
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-indigo-400 font-semibold">{preset.category}</span>
+                    <span className="text-slate-400">{preset.sources} src / {preset.iterations} iter</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 line-clamp-2 leading-snug">
+                    {preset.prompt}
+                  </p>
                 </button>
               ))}
             </div>
@@ -124,14 +170,20 @@ export const Discover: React.FC = () => {
 
         {/* Bounded Configuration Parameters */}
         <div className="bg-[#11151E] border border-[#1E2535] rounded-xl p-5 space-y-5">
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-200 pb-2 border-b border-[#1E2535]">
-            <Sliders className="w-4 h-4 text-indigo-400" />
-            <span>Operational Constraints & Resource Budgets</span>
+          <div className="flex items-center justify-between pb-2 border-b border-[#1E2535]">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
+              <Sliders className="w-4 h-4 text-indigo-400" />
+              <span>Operational Constraints & Resource Budgets</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400">
+              <Shield className="w-3.5 h-3.5" />
+              <span>Safety Bounded</span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Source Budget */}
-            <div className="space-y-2">
+            <div className="space-y-2 bg-[#0E1118] p-3.5 rounded-lg border border-[#1E2535]">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-300 flex items-center gap-1.5 font-medium">
                   <Search className="w-3.5 h-3.5 text-indigo-400" />
@@ -149,12 +201,12 @@ export const Discover: React.FC = () => {
                 className="w-full accent-indigo-500 cursor-pointer h-1.5 bg-[#161B27] rounded-lg"
               />
               <p className="text-[10px] text-slate-400">
-                DuckDuckGo search queries and pages safely fetched and scraped.
+                DuckDuckGo search queries and pages safely fetched and parsed.
               </p>
             </div>
 
             {/* Max Iterations */}
-            <div className="space-y-2">
+            <div className="space-y-2 bg-[#0E1118] p-3.5 rounded-lg border border-[#1E2535]">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-300 flex items-center gap-1.5 font-medium">
                   <Layers className="w-3.5 h-3.5 text-indigo-400" />
@@ -177,7 +229,7 @@ export const Discover: React.FC = () => {
             </div>
 
             {/* Time Budget */}
-            <div className="space-y-2">
+            <div className="space-y-2 bg-[#0E1118] p-3.5 rounded-lg border border-[#1E2535]">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-300 flex items-center gap-1.5 font-medium">
                   <Clock className="w-3.5 h-3.5 text-indigo-400" />
@@ -200,7 +252,7 @@ export const Discover: React.FC = () => {
             </div>
 
             {/* Token Budget */}
-            <div className="space-y-2">
+            <div className="space-y-2 bg-[#0E1118] p-3.5 rounded-lg border border-[#1E2535]">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-300 flex items-center gap-1.5 font-medium">
                   <Coins className="w-3.5 h-3.5 text-indigo-400" />
@@ -220,14 +272,19 @@ export const Discover: React.FC = () => {
                 className="w-full accent-indigo-500 cursor-pointer h-1.5 bg-[#161B27] rounded-lg"
               />
               <p className="text-[10px] text-slate-400">
-                Stops LLM synthesis if reported Ollama context usage exceeds limit.
+                Stops LLM synthesis if reported context usage exceeds limit.
               </p>
             </div>
           </div>
         </div>
 
         {/* Submit Bar */}
-        <div className="flex items-center justify-end gap-3 pt-2">
+        <div className="flex items-center justify-between pt-2">
+          <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+            <Activity className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Autonomous engine standing by</span>
+          </div>
+
           <button
             type="submit"
             disabled={loading || !query.trim()}
