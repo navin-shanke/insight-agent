@@ -11,11 +11,14 @@ Provides endpoints for:
 from __future__ import annotations
 
 from typing import List, Optional, Union
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
 from app.api.v1.auth import get_current_user
 from app.schemas.api.auth import TokenData
 from app.schemas.api.instagram import (
+    BatchImportCommitRequest,
+    BatchImportCommitResponse,
+    BatchImportPreviewResponse,
     FormatBreakdown,
     HookTypeBreakdown,
     InstagramExperimentIn,
@@ -33,6 +36,7 @@ from app.schemas.api.instagram import (
     UserFeedbackItem,
 )
 from app.services.instagram_learning import InstagramLearningService
+from app.services.instagram_batch import InstagramBatchService
 
 router = APIRouter(prefix="/instagram", tags=["instagram"])
 
@@ -223,3 +227,35 @@ async def review_proposal(
     if not updated:
         raise HTTPException(status_code=404, detail=f"Proposal {proposal_id} not found")
     return updated
+
+
+@router.post(
+    "/batch/preview",
+    response_model=BatchImportPreviewResponse,
+    summary="Preview and validate CSV or JSON file upload before committing",
+)
+async def preview_batch_file(
+    file: UploadFile = File(...),
+    _user: TokenData = Depends(get_current_user),
+) -> BatchImportPreviewResponse:
+    content = await file.read()
+    svc = _get_service()
+    return InstagramBatchService.parse_raw_content(
+        content_bytes=content,
+        filename=file.filename or "upload.csv",
+        service=svc,
+    )
+
+
+@router.post(
+    "/batch/commit",
+    response_model=BatchImportCommitResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Atomically commit previewed observations into the learning dataset",
+)
+async def commit_batch_import(
+    payload: BatchImportCommitRequest,
+    _user: TokenData = Depends(get_current_user),
+) -> BatchImportCommitResponse:
+    svc = _get_service()
+    return InstagramBatchService.commit_batch_import(payload, service=svc)

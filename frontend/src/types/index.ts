@@ -323,3 +323,47 @@ export interface InstagramPatternsResponse {
   top_hashtags: { tag: string; count: number }[];
   disclaimer: string;
 }
+
+export interface BatchImportItemPreview {
+  row_index: number;
+  status: 'valid' | 'duplicate' | 'invalid';
+  source_url?: string | null;
+  account_handle?: string | null;
+  content_id?: string | null;
+  format: string;
+  caption_preview?: string | null;
+  metrics?: {
+    likes?: number | null;
+    views?: number | null;
+    comments?: number | null;
+    shares?: number | null;
+    saves?: number | null;
+  } | null;
+  posted_at?: string | null;
+  reasons: string[];
+  parsed_observation?: any;
+}
+
+export interface BatchImportPreviewResponse {
+  total_rows: number;
+  valid_count: number;
+  duplicate_count: number;
+  invalid_count: number;
+  items: BatchImportItemPreview[];
+  can_commit: boolean;
+  import_token: string;
+}
+
+export interface BatchImportCommitRequest {
+  items: any[];
+  provenance_label?: string;
+  skip_duplicates?: boolean;
+}
+
+export interface BatchImportCommitResponse {
+  imported_count: number;
+  skipped_count: number;
+  strategy_version: number;
+  message: string;
+  imported_ids: string[];
+}

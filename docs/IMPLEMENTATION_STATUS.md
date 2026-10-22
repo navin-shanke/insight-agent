@@ -55,3 +55,17 @@ The test suite uses SQLite. No PostgreSQL service was available, and no CI check
 ## Database safety gate follow-up (2026-10-21)
 
 A documentation-only handoff inspection freshly confirmed the configured original at revision 35fd433a99c2 (SQLite integrity check returned ok, 11 tables), and the durable backup exists and independently passes integrity at the same revision (11 tables). The backup remains outside the repository. The temporary migrated copy also still exists; it passes integrity at b791c6a48d21 and has 12 tables. Its ACL owner was the current Windows user. An open-handle check was not completed, so the file was deliberately left in place. No application database was migrated in this follow-up. See docs/ANTIGRAVITY_HANDOFF.md and docs/database-backup-and-migration.md.
+
+## Instagram Intelligence & Batch Import Milestone (2026-10-22)
+
+- **Scope:** Ingest historical Instagram post data via batch CSV/JSON upload with validation, duplicate detection, strict null-metric preservation, and strategy adaptation.
+- **Backend Services:** Implemented InstagramBatchService supporting flexible field alias mappings, delimiter sniffing (comma/semicolon), intra-file duplicate detection, and database conflict checking against data/instagram_learning.sqlite.
+- **API Endpoints:** Added POST /api/v1/instagram/batch/preview (multipart file upload) and POST /api/v1/instagram/batch/commit.
+- **Frontend Dashboard:** Integrated Batch Import modal into the Observed Content Ledger tab with drag-and-drop file upload, inline CSV template preview, 4-stat metric breakdown (total, valid, duplicates, invalid), and preview table before commit.
+- **Verification Evidence:**
+  - ackend/tests/unit/test_instagram_batch.py: 5 passed.
+  - ackend/tests/integration/test_e2e_live.py: Passed (tested live E2E against running Uvicorn server).
+  - Full backend test suite: **117 passed**.
+  - Frontend Vitest suite: **4 passed**.
+  - Frontend production build (	sc -b && vite build): Succeeded in 2.64s.
+  - Original research database data/insight.db remains strictly untouched.

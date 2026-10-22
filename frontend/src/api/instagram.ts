@@ -1,5 +1,8 @@
 import { apiClient } from './client';
 import {
+  BatchImportCommitRequest,
+  BatchImportCommitResponse,
+  BatchImportPreviewResponse,
   InstagramExperiment,
   InstagramObservation,
   InstagramPatternsResponse,
@@ -119,5 +122,21 @@ export async function reviewSystemImprovementProposal(
   review: ProposalReviewIn
 ): Promise<SystemImprovementProposal> {
   const res = await apiClient.post<SystemImprovementProposal>(`/instagram/proposals/${proposalId}/review`, review);
+  return res.data;
+}
+
+export async function previewBatchImport(file: File): Promise<BatchImportPreviewResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await apiClient.post<BatchImportPreviewResponse>('/instagram/batch/preview', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return res.data;
+}
+
+export async function commitBatchImport(payload: BatchImportCommitRequest): Promise<BatchImportCommitResponse> {
+  const res = await apiClient.post<BatchImportCommitResponse>('/instagram/batch/commit', payload);
   return res.data;
 }

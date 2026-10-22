@@ -406,8 +406,12 @@ class InstagramLearningService:
         now = _now_utc()
         sample_size = len(observations)
 
-        # Feedback decisions
-        rejected_patterns = {f.target_id for f in feedback_items if f.action == "rejected"}
+        # Feedback decisions: use the latest user feedback action per target
+        latest_pattern_feedback: dict[str, str] = {}
+        for f in feedback_items:
+            if f.target_id not in latest_pattern_feedback:
+                latest_pattern_feedback[f.target_id] = f.action
+        rejected_patterns = {tid for tid, act in latest_pattern_feedback.items() if act == "rejected"}
 
         promising_patterns: List[PromisingPattern] = []
         tested_hypotheses: List[TestedHypothesis] = []
@@ -510,7 +514,12 @@ class InstagramLearningService:
         now = _now_utc()
         sample_size = len(observations)
         carousels = [o for o in observations if o.format == "carousel"]
-        rejected_recs = {f.target_id for f in feedback_items if f.target_type == "recommendation" and f.action == "rejected"}
+        # Latest feedback action per recommendation
+        latest_rec_feedback: dict[str, str] = {}
+        for f in feedback_items:
+            if f.target_type == "recommendation" and f.target_id not in latest_rec_feedback:
+                latest_rec_feedback[f.target_id] = f.action
+        rejected_recs = {tid for tid, act in latest_rec_feedback.items() if act == "rejected"}
 
         recs: List[InstagramRecommendation] = []
 

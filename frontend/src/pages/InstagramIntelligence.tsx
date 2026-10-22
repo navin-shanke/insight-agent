@@ -28,6 +28,10 @@ import {
   Wrench,
   Code,
   ShieldAlert,
+  Upload,
+  FileSpreadsheet,
+  FileText,
+  Copy,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { SkeletonCard } from '../design-system/components/SkeletonCard';
@@ -46,8 +50,11 @@ import {
   submitInstagramFeedback,
   createInstagramExperiment,
   recordExperimentOutcome,
+  previewBatchImport,
+  commitBatchImport,
 } from '../api/instagram';
 import {
+  BatchImportPreviewResponse,
   InstagramExperiment,
   InstagramObservation,
   InstagramPatternsResponse,
@@ -68,6 +75,15 @@ export const InstagramIntelligence: React.FC = () => {
   const [recommendations, setRecommendations] = useState<InstagramRecommendation[]>([]);
   const [strategyHistory, setStrategyHistory] = useState<InstagramStrategyVersionOut[]>([]);
   const [proposals, setProposals] = useState<SystemImprovementProposal[]>([]);
+
+  // Batch Import Modal state
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchFile, setBatchFile] = useState<File | null>(null);
+  const [batchPreview, setBatchPreview] = useState<BatchImportPreviewResponse | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchCommitting, setBatchCommitting] = useState(false);
+  const [provenanceLabel, setProvenanceLabel] = useState('Batch file export');
+  const [skipDuplicates, setSkipDuplicates] = useState(true);
 
   // Ingest Modal state
   const [showIngestModal, setShowIngestModal] = useState(false);
@@ -167,6 +183,60 @@ export const InstagramIntelligence: React.FC = () => {
     } catch {
       toast.error('Failed to review proposal');
     }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBatchFile(file);
+    setBatchLoading(true);
+    setProvenanceLabel(`Import from ${file.name}`);
+    try {
+      const preview = await previewBatchImport(file);
+      setBatchPreview(preview);
+      if (preview.valid_count === 0 && preview.total_rows > 0) {
+        toast.error('No valid rows found in file. Check format and required fields.');
+      } else {
+        toast.success(`Parsed ${preview.total_rows} rows (${preview.valid_count} valid, ${preview.duplicate_count} duplicate)`);
+      }
+    } catch {
+      toast.error('Failed to parse file. Ensure it is a valid CSV or JSON file.');
+      setBatchPreview(null);
+    } finally {
+      setBatchLoading(false);
+    }
+  };
+
+  const handleCommitBatch = async () => {
+    if (!batchPreview || batchPreview.valid_count === 0) return;
+    setBatchCommitting(true);
+    try {
+      const validItems = batchPreview.items
+        .filter((item) => item.status === 'valid' && item.parsed_observation)
+        .map((item) => item.parsed_observation);
+
+      const res = await commitBatchImport({
+        items: validItems,
+        provenance_label: provenanceLabel.trim() || 'Batch dataset import',
+        skip_duplicates: skipDuplicates,
+      });
+
+      toast.success(res.message);
+      setShowBatchModal(false);
+      setBatchFile(null);
+      setBatchPreview(null);
+      await loadAll();
+    } catch {
+      toast.error('Failed to commit batch import');
+    } finally {
+      setBatchCommitting(false);
+    }
+  };
+
+  const copyCsvTemplate = () => {
+    const template = 'url,creator,type,caption,likes,views,comments,saves\nhttps://www.instagram.com/reel/example1,@creator,reel,5 developer mistakes to avoid in 2026,450,12000,35,180\nhttps://www.instagram.com/p/example2,@creator,carousel,Architecture patterns comparison,300,,15,\n';
+    navigator.clipboard.writeText(template);
+    toast.success('Example CSV template copied to clipboard');
   };
 
   useEffect(() => {
@@ -302,11 +372,18 @@ export const InstagramIntelligence: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowBatchModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-[#11151E] hover:bg-[#161B27] text-slate-200 border border-[#1E2535] transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Import CSV / JSON</span>
+          </button>
+          <button
             onClick={() => setShowIngestModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/20 transition-all"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Ingest Post Observation</span>
+            <span>Ingest Post</span>
           </button>
           <button
             onClick={loadAll}
@@ -955,13 +1032,22 @@ export const InstagramIntelligence: React.FC = () => {
               </span>
             </div>
 
-            <button
-              onClick={() => setShowIngestModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold self-start sm:self-auto"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Ingest New Post</span>
-            </button>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <button
+                onClick={() => setShowBatchModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#161B27] hover:bg-[#1E2535] text-slate-200 border border-[#1E2535] text-xs font-medium transition-colors"
+              >
+                <Upload className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Import CSV / JSON</span>
+              </button>
+              <button
+                onClick={() => setShowIngestModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Ingest Single Post</span>
+              </button>
+            </div>
           </div>
 
           {observations.length > 0 ? (
@@ -1222,6 +1308,201 @@ export const InstagramIntelligence: React.FC = () => {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Modal: Batch CSV / JSON Import */}
+      {showBatchModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#11151E] border border-[#1E2535] rounded-xl max-w-2xl w-full p-6 space-y-5 shadow-2xl animate-fade-in max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#1E2535] pb-3 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <Upload className="w-4 h-4 text-indigo-400" />
+                <h3 className="text-base font-bold text-slate-100">Batch Import Historical Posts (CSV / JSON)</h3>
+              </div>
+              <button
+                onClick={() => {
+                  setShowBatchModal(false);
+                  setBatchPreview(null);
+                  setBatchFile(null);
+                }}
+                className="text-slate-400 hover:text-slate-200 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body: Scrollable */}
+            <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
+              {/* File Dropzone & Instructions */}
+              <div className="p-4 rounded-xl border-2 border-dashed border-[#1E2535] hover:border-indigo-500/50 bg-[#0E1118] text-center space-y-2 transition-colors">
+                <div className="flex justify-center gap-3 text-slate-400">
+                  <FileSpreadsheet className="w-8 h-8 text-indigo-400" />
+                  <FileText className="w-8 h-8 text-cyan-400" />
+                </div>
+                <div>
+                  <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-600/20">
+                    <span>Select CSV or JSON File</span>
+                    <input
+                      type="file"
+                      accept=".csv,.json,text/csv,application/json"
+                      className="hidden"
+                      onChange={handleFileSelect}
+                      disabled={batchLoading}
+                    />
+                  </label>
+                  <p className="text-[11px] text-slate-400 mt-1.5">
+                    {batchFile ? `Selected: ${batchFile.name}` : 'Upload post archives or analytics exports'}
+                  </p>
+                </div>
+
+                <div className="pt-2 border-t border-[#1E2535]/80 flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Supported headers: url, caption, format, likes, views, comments, saves</span>
+                  <button
+                    type="button"
+                    onClick={copyCsvTemplate}
+                    className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300 font-medium"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Copy CSV Template</span>
+                  </button>
+                </div>
+              </div>
+
+              {batchLoading && (
+                <div className="p-6 text-center text-slate-400 space-y-2">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto text-indigo-400" />
+                  <p>Parsing and validating records against database...</p>
+                </div>
+              )}
+
+              {/* Preview Section */}
+              {batchPreview && !batchLoading && (
+                <div className="space-y-4 pt-1">
+                  {/* Summary Counters */}
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div className="p-2.5 rounded-lg bg-[#161B27] border border-[#1E2535]">
+                      <span className="text-[10px] text-slate-400 block uppercase">Total Rows</span>
+                      <span className="text-base font-bold text-slate-100 font-mono">{batchPreview.total_rows}</span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                      <span className="text-[10px] text-emerald-400 block uppercase">Valid</span>
+                      <span className="text-base font-bold text-emerald-300 font-mono">{batchPreview.valid_count}</span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <span className="text-[10px] text-amber-400 block uppercase">Duplicates</span>
+                      <span className="text-base font-bold text-amber-300 font-mono">{batchPreview.duplicate_count}</span>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                      <span className="text-[10px] text-rose-400 block uppercase">Invalid</span>
+                      <span className="text-base font-bold text-rose-300 font-mono">{batchPreview.invalid_count}</span>
+                    </div>
+                  </div>
+
+                  {/* Settings & Provenance */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-[#0E1118] border border-[#1E2535]">
+                    <div className="space-y-1">
+                      <label className="text-slate-300 font-medium block text-[11px]">Provenance Label</label>
+                      <input
+                        type="text"
+                        value={provenanceLabel}
+                        onChange={(e) => setProvenanceLabel(e.target.value)}
+                        placeholder="e.g. Creator Q3 Archive"
+                        className="w-full bg-[#161B27] border border-[#1E2535] rounded p-1.5 text-slate-200 text-xs outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-4">
+                      <input
+                        type="checkbox"
+                        id="skip_dups"
+                        checked={skipDuplicates}
+                        onChange={(e) => setSkipDuplicates(e.target.checked)}
+                        className="rounded border-[#1E2535] bg-[#161B27] text-indigo-500 focus:ring-0"
+                      />
+                      <label htmlFor="skip_dups" className="text-slate-300 text-xs select-none">
+                        Skip duplicate records automatically
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Table of Parsed Records */}
+                  <div className="space-y-2">
+                    <span className="font-semibold text-slate-200 block text-xs">Parsed Records Preview</span>
+                    <div className="max-h-56 overflow-y-auto rounded-lg border border-[#1E2535] divide-y divide-[#1E2535] bg-[#0E1118]">
+                      {batchPreview.items.map((item) => (
+                        <div key={item.row_index} className="p-2.5 text-[11px] flex items-start justify-between gap-3 hover:bg-[#161B27]/40">
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-slate-500 text-[10px]">#{item.row_index}</span>
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                  item.status === 'valid'
+                                    ? 'bg-emerald-500/20 text-emerald-300'
+                                    : item.status === 'duplicate'
+                                    ? 'bg-amber-500/20 text-amber-300'
+                                    : 'bg-rose-500/20 text-rose-300'
+                                }`}
+                              >
+                                {item.status}
+                              </span>
+                              <span className="font-mono text-slate-300 truncate max-w-xs">{item.source_url || 'No URL'}</span>
+                              <span className="px-1.5 py-0.2 rounded text-[9px] bg-[#161B27] text-slate-400 uppercase">{item.format}</span>
+                            </div>
+                            <p className="text-slate-400 truncate max-w-md">{item.caption_preview || 'No caption'}</p>
+                            {item.reasons.length > 0 && (
+                              <p className="text-amber-400/90 text-[10px]">{item.reasons.join(', ')}</p>
+                            )}
+                          </div>
+
+                          <div className="text-right text-[10px] text-slate-400 font-mono whitespace-nowrap">
+                            {item.metrics ? (
+                              <div>
+                                <span>Likes: {item.metrics.likes ?? '—'}</span>
+                                {item.metrics.views !== undefined && <span> • Views: {item.metrics.views ?? '—'}</span>}
+                              </div>
+                            ) : (
+                              <span>Metrics: —</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between border-t border-[#1E2535] pt-3 flex-shrink-0 text-xs">
+              <span className="text-slate-400 text-[11px]">
+                {batchPreview ? `${batchPreview.valid_count} posts ready for ingestion` : 'Select a file to begin'}
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowBatchModal(false);
+                    setBatchPreview(null);
+                    setBatchFile(null);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-[#161B27] hover:bg-[#1E2535] text-slate-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!batchPreview || batchPreview.valid_count === 0 || batchCommitting}
+                  onClick={handleCommitBatch}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold transition-all shadow-md shadow-emerald-600/20"
+                >
+                  {batchCommitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Commit Import ({batchPreview?.valid_count || 0} Posts)</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

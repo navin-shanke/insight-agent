@@ -203,3 +203,45 @@ class SystemImprovementProposal(BaseModel):
 class ProposalReviewIn(BaseModel):
     action: Literal["APPROVED", "REJECTED"]
     review_notes: Optional[str] = None
+
+
+class BatchImportItemPreview(BaseModel):
+    """Detailed preview of a parsed row from a CSV/JSON import."""
+    row_index: int
+    status: Literal["valid", "duplicate", "invalid"]
+    source_url: Optional[str] = None
+    account_handle: Optional[str] = None
+    content_id: Optional[str] = None
+    format: str = "unknown"
+    caption_preview: Optional[str] = None
+    metrics: Optional[InstagramMetrics] = None
+    posted_at: Optional[datetime] = None
+    reasons: List[str] = Field(default_factory=list)
+    parsed_observation: Optional[InstagramObservationIn] = None
+
+
+class BatchImportPreviewResponse(BaseModel):
+    """Preview summary of batch file parsing prior to database commit."""
+    total_rows: int
+    valid_count: int
+    duplicate_count: int
+    invalid_count: int
+    items: List[BatchImportItemPreview]
+    can_commit: bool
+    import_token: str
+
+
+class BatchImportCommitRequest(BaseModel):
+    """Payload to commit validated observations from a previous preview."""
+    items: List[InstagramObservationIn]
+    provenance_label: Optional[str] = "Batch dataset import"
+    skip_duplicates: bool = True
+
+
+class BatchImportCommitResponse(BaseModel):
+    """Result summary of a committed batch import."""
+    imported_count: int
+    skipped_count: int
+    strategy_version: int
+    message: str
+    imported_ids: List[str]

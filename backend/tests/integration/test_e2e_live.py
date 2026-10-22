@@ -12,6 +12,7 @@ Tests the full automated loop without requiring manual user interaction:
 9. Level B Self-improvement proposals review and diff inspection.
 """
 
+import uuid
 import httpx
 import pytest
 
@@ -117,6 +118,19 @@ def test_e2e_full_live_system_workflow():
     updated_rec_ids = [r["id"] for r in updated_recs_resp.json()]
     assert target_rec["id"] not in updated_rec_ids
 
+    # Restore recommendation so subsequent test runs remain idempotent
+    restore_resp = client.post(
+        "/api/v1/instagram/feedback",
+        json={
+            "target_id": target_rec["id"],
+            "target_type": "recommendation",
+            "action": "accepted",
+            "user_note": "Autonomous QA restoration",
+        },
+        headers=headers,
+    )
+    assert restore_resp.status_code == 201
+
     # 8. Versioned Strategy Profile History & Rollback
     history_resp = client.get("/api/v1/instagram/strategy/history", headers=headers)
     assert history_resp.status_code == 200
@@ -151,3 +165,50 @@ def test_e2e_full_live_system_workflow():
     reviewed_prop = review_resp.json()
     assert reviewed_prop["status"] in ("APPROVED", "APPLIED")
     assert reviewed_prop["reviewed_at"] is not None
+
+    # 10. Batch CSV Import Preview & Commit Workflow
+    batch_tag = uuid.uuid4().hex[:8]
+    unique_batch_url = f"https://www.instagram.com/reel/BATCH_E2E_{batch_tag}"
+    csv_bytes = (
+        f"url,creator,type,caption,likes,views,saves\n"
+        f"{unique_batch_url},@e2e_tester,reel,Autonomous testing pipeline in action,950,,310\n"
+        f"https://www.instagram.com/reel/DEMO_AUTONOMOUS_TEST,@tech_intelligence,reel,Duplicate from step 4,420,,\n"
+    ).encode("utf-8")
+
+    preview_resp = client.post(
+        "/api/v1/instagram/batch/preview",
+        files={"file": ("e2e_batch.csv", csv_bytes, "text/csv")},
+        headers=headers,
+    )
+    assert preview_resp.status_code == 200, f"Batch preview failed: {preview_resp.text}"
+    p_data = preview_resp.json()
+    assert p_data["total_rows"] == 2
+    assert p_data["valid_count"] == 1
+    assert p_data["duplicate_count"] == 1
+    assert p_data["can_commit"] is True
+
+    valid_to_commit = [item["parsed_observation"] for item in p_data["items"] if item["status"] == "valid"]
+    commit_resp = client.post(
+        "/api/v1/instagram/batch/commit",
+        json={
+            "items": valid_to_commit,
+            "provenance_label": "Live E2E Verification Batch",
+            "skip_duplicates": True,
+        },
+        headers=headers,
+    )
+    assert commit_resp.status_code == 201, f"Batch commit failed: {commit_resp.text}"
+    c_data = commit_resp.json()
+    assert c_data["imported_count"] == 1
+    assert c_data["skipped_count"] == 0
+
+    # Verify committed observation in ledger with null metrics preserved
+    obs_resp = client.get("/api/v1/instagram/observations?limit=10", headers=headers)
+    assert obs_resp.status_code == 200
+    all_obs = obs_resp.json()["items"]
+    e2e_post = next((o for o in all_obs if o["source_url"] == unique_batch_url), None)
+    assert e2e_post is not None
+    assert e2e_post["metrics"]["likes"] == 950
+    assert e2e_post["metrics"]["views"] is None
+    assert e2e_post["metrics"]["saves"] == 310
+    assert "Live E2E Verification Batch" in (e2e_post["provenance_notes"] or "")
